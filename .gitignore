@@ -1,0 +1,68 @@
+# Git ignore for .NET / WPF / Visual Studio projects
+# IDE
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]ld/
+[Oo]ut/
+artifacts/
+
+# Multi-targeted build folders
+**/bin/
+**/obj/
+**/out/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/artifacts/
+
+# Logs and diagnostics
+*.log
+**/logs/
+**/Logs/
+TestResult*/
+**/TestResults/
+*.svclog
+
+# NuGet
+*.nupkg
+packages/
+**/packages/*
+!**/packages/build/
+.nuget/
+
+# Rider / ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Publish
+**/publish/
+**/AppPackages/
+
+# Coverage
+*.coverage
+*.coveragexml
+
+# Misc
+*.pidb
+*.pdb
+*.mdb
+*.cache
+*.dbmdl
+*.opendb
+*.jfm
