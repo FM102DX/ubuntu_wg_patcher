@@ -25,7 +25,6 @@ namespace ubuntu_wg_patcher.Services
         {
             void LogLine(string line)
             {
-                Log.Information(line);
                 progress.Report(line);
             }
 
@@ -40,13 +39,40 @@ namespace ubuntu_wg_patcher.Services
                 LogLine("Preflight checks and host configuration...");
                 var preflight = RemoteScripts.BuildPreflightScript(session.WgPort, session.DisableIPv6);
                 var tmpScript = "/tmp/wg_preflight.sh";
-                await _ssh.UploadTextAsync(tmpScript, "#!/usr/bin/env bash\n" + preflight, ct);
+                var fullScript = "#!/usr/bin/env bash\n" + preflight;
+                Log.Debug("---- BEGIN preflight.sh ----\n{Script}\n---- END preflight.sh ----", fullScript);
+                await _ssh.UploadTextAsync(tmpScript, fullScript, ct);
                 var (exitP, stdoutP, stderrP) = await _ssh.RunCommandAsync($"bash {tmpScript}", TimeSpan.FromMinutes(10), ct);
                 if (exitP != 0)
                 {
                     throw new Exception($"preflight failed: {stderrP}\n{stdoutP}");
                 }
 
+                // Print diagnostics output captured from the preflight script
+                LogLine("Diagnostics output:");
+                foreach (var l in (stdoutP ?? string.Empty).Split('\n'))
+                {
+                    var line = l.TrimEnd();
+                    if (!string.IsNullOrWhiteSpace(line)) LogLine(line);
+                }
+                foreach (var l in (stderrP ?? string.Empty).Split('\n'))
+                {
+                    var line = l.TrimEnd();
+                    if (!string.IsNullOrWhiteSpace(line)) LogLine(line);
+                }
+                LogLine("Diagnostics complete.");
+
+                // Early return for incremental rollout
+                return new RunnerResult
+                {
+                    PublicIp = string.Empty,
+                    GeoJson = string.Empty,
+                    ExportPath = session.ExportPath,
+                    LogFilePath = LogService.CurrentLogFilePath ?? string.Empty
+                };
+
+                /*
+                // --- Original workflow (commented out temporarily) ---
                 LogLine("Fetching public IP and GeoIP...");
                 var publicIp = await _ssh.GetPublicIpAsync(ct);
                 var geoJson = await _ssh.GetGeoJsonAsync(ct);
@@ -88,6 +114,7 @@ namespace ubuntu_wg_patcher.Services
                     ExportPath = session.ExportPath,
                     LogFilePath = LogService.CurrentLogFilePath ?? string.Empty
                 };
+                */
             }
             finally
             {

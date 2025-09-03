@@ -157,6 +157,24 @@ namespace ubuntu_wg_patcher.ViewModels
                 Level = lvl,
                 Timestamp = DateTime.Now
             });
+
+            // Mirror GUI log lines to file via Serilog
+            try
+            {
+                switch (lvl)
+                {
+                    case LogLevel.Error:
+                        Log.Error("{Message}", message);
+                        break;
+                    case LogLevel.Success:
+                    case LogLevel.Command:
+                    case LogLevel.Info:
+                    default:
+                        Log.Information("{Message}", message);
+                        break;
+                }
+            }
+            catch { }
         }
 
         private static LogLevel DetectLevel(string message)
@@ -183,6 +201,24 @@ namespace ubuntu_wg_patcher.ViewModels
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = ExportPath,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch { }
+        }
+
+        [RelayCommand]
+        private void OpenLogsFolder()
+        {
+            try
+            {
+                var dir = LogService.LogsDirectory;
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = dir,
                         UseShellExecute = true
                     });
                 }

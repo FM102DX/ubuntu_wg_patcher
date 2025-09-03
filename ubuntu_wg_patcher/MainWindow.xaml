@@ -80,6 +80,7 @@
                     <!-- Bottom-right action buttons -->
                     <StackPanel Grid.Row="9" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Content="Save" Width="100" Height="32" Command="{Binding SaveTempCommand}"/>
+                        <Button Content="Open logs" Margin="8,0,0,0" Width="110" Height="32" Command="{Binding OpenLogsFolderCommand}"/>
                         <Button Content="Open folder" Margin="8,0,0,0" Width="120" Height="32" Command="{Binding OpenExportFolderCommand}"/>
                         <Button Content="START" Margin="8,0,0,0" Width="120" Height="36" Command="{Binding StartCommand}"/>
                     </StackPanel>

@@ -69,7 +69,9 @@ namespace ubuntu_wg_patcher.Services
         public async Task UploadTextAsync(string remotePath, string content, CancellationToken ct)
         {
             if (_sftp == null) throw new InvalidOperationException("SFTP client not connected");
-            using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            // Normalize to LF to prevent bash errors like: set: -\r: invalid option
+            var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
+            using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(normalized));
             await Task.Run(() =>
             {
                 var dir = Path.GetDirectoryName(remotePath)!.Replace("\\", "/");

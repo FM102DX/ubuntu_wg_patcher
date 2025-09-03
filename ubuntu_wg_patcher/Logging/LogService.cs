@@ -7,14 +7,15 @@ namespace ubuntu_wg_patcher.Logging
     public static class LogService
     {
         public static string? CurrentLogFilePath { get; private set; }
+        public static string LogsDirectory { get; private set; } = string.Empty;
 
         public static void StartNewLog()
         {
             var baseDir = AppContext.BaseDirectory;
-            var logsDir = Path.Combine(baseDir, "logs");
-            Directory.CreateDirectory(logsDir);
+            LogsDirectory = Path.Combine(baseDir, "logs");
+            Directory.CreateDirectory(LogsDirectory);
             var stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            CurrentLogFilePath = Path.Combine(logsDir, $"{stamp}.log");
+            CurrentLogFilePath = Path.Combine(LogsDirectory, $"{stamp}.log");
 
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
