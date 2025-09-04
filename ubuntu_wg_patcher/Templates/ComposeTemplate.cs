@@ -8,7 +8,6 @@ namespace ubuntu_wg_patcher.Templates
         public static string Generate(string serverPublicIp, int wgPort, int peers)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("version: \"3.8\"");
             sb.AppendLine("services:");
             sb.AppendLine("  wireguard:");
             sb.AppendLine("    image: lscr.io/linuxserver/wireguard:latest");
@@ -28,8 +27,6 @@ namespace ubuntu_wg_patcher.Templates
             sb.AppendLine("      - ALLOWEDIPS=0.0.0.0/0");
             sb.AppendLine("    volumes:");
             sb.AppendLine("      - /opt/wireguard/config:/config");
-            sb.AppendLine("    sysctls:");
-            sb.AppendLine("      - net.ipv4.conf.all.src_valid_mark=1");
             sb.AppendLine("    restart: unless-stopped");
             return sb.ToString();
         }

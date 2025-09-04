@@ -25,15 +25,16 @@ namespace ubuntu_wg_patcher.Services
             sb.AppendLine("# if ! command -v docker >/dev/null 2>&1; then apt-get install -y docker.io || true; fi");
             sb.AppendLine("# systemctl enable --now docker 2>/dev/null || service docker start 2>/dev/null || true");
             sb.AppendLine("# mkdir -p /opt/wireguard");
-            sb.AppendLine("# cat >/etc/sysctl.d/99-wg.conf <<'EOF'");
-            sb.AppendLine("# net.ipv4.ip_forward=1");
+            sb.AppendLine("cat >/etc/sysctl.d/99-wg.conf <<'EOF'");
+            sb.AppendLine("net.ipv4.ip_forward=1");
+            sb.AppendLine("net.ipv4.conf.all.src_valid_mark=1");
             if (disableIPv6)
             {
-                sb.AppendLine("# net.ipv6.conf.all.disable_ipv6=1");
-                sb.AppendLine("# net.ipv6.conf.default.disable_ipv6=1");
+                sb.AppendLine("net.ipv6.conf.all.disable_ipv6=1");
+                sb.AppendLine("net.ipv6.conf.default.disable_ipv6=1");
             }
-            sb.AppendLine("# EOF");
-            sb.AppendLine("# sysctl -p /etc/sysctl.d/99-wg.conf || true");
+            sb.AppendLine("EOF");
+            sb.AppendLine("sysctl -p /etc/sysctl.d/99-wg.conf || true");
             sb.AppendLine("# IFACE=$(ip -4 route ls default | awk '{print $5}' | head -n1)");
             sb.AppendLine("# if ! iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE 2>/dev/null; then");
             sb.AppendLine("#   iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE");
