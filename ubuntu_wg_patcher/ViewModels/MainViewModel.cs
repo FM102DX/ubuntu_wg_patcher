@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -74,6 +75,16 @@ namespace ubuntu_wg_patcher.ViewModels
         private void BrowseExportPath()
         {
             using var dlg = new FolderBrowserDialog();
+            dlg.Description = "Select export folder";
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(ExportPath) && Directory.Exists(ExportPath))
+                    dlg.SelectedPath = ExportPath;
+                else
+                    dlg.SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+            catch { }
+            dlg.ShowNewFolderButton = true;
             if (dlg.ShowDialog() == DialogResult.OK)
             {
                 ExportPath = dlg.SelectedPath;

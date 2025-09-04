@@ -149,6 +149,28 @@ namespace ubuntu_wg_patcher.Services
                         LogLine($"Compose installed: {stdoutC.Trim()} {stderrC.Trim()}");
                     }
                 }
+                // --- Remove existing WireGuard (container and directory) ---
+                LogLine("Removing existing WireGuard installation (container and directory)...");
+                var checkContainerCmd = "docker ps -aq -f name=^wireguard$";
+                var (_, outChk, errChk) = await _ssh.RunCommandAsync(checkContainerCmd, TimeSpan.FromSeconds(20), ct);
+                if (!string.IsNullOrWhiteSpace((outChk ?? string.Empty).Trim()))
+                {
+                    LogLine("Existing container 'wireguard' found. Removing...");
+                    await _ssh.RunCommandAsync("docker rm -f wireguard 2>/dev/null || true", TimeSpan.FromMinutes(2), ct);
+                }
+                var (_, outVerify, errVerify) = await _ssh.RunCommandAsync(checkContainerCmd, TimeSpan.FromSeconds(20), ct);
+                if (!string.IsNullOrWhiteSpace((outVerify ?? string.Empty).Trim()))
+                {
+                    throw new Exception($"Failed to remove WireGuard container: {errVerify}\n{outVerify}");
+                }
+
+                // Remove directory /opt/wireguard
+                await _ssh.RunCommandAsync("rm -rf /opt/wireguard 2>/dev/null || true", TimeSpan.FromMinutes(2), ct);
+                var (exitDirOk, _, errDir) = await _ssh.RunCommandAsync("test ! -d /opt/wireguard", TimeSpan.FromSeconds(10), ct);
+                if (exitDirOk != 0)
+                {
+                    throw new Exception($"Failed to remove /opt/wireguard directory: {errDir}");
+                }
 
                 // --- WireGuard section ---
                 LogLine("Preparing /opt/wireguard and docker-compose.yml...");
@@ -160,15 +182,36 @@ namespace ubuntu_wg_patcher.Services
                 await _ssh.UploadTextAsync(composePath, compose, ct);
 
                 LogLine("Starting WireGuard container...");
-                var startCmd = "CMD=\"docker compose\"; docker compose version >/dev/null 2>&1 || CMD=\"docker-compose\"; $CMD -f /opt/wireguard/docker-compose.yml up -d";
-                var (exitUp, stdoutUp, stderrUp) = await _ssh.RunCommandAsync(startCmd, TimeSpan.FromMinutes(5), ct);
+                var composeSelect = "COMPOSE=\"docker compose\"; docker compose version >/dev/null 2>&1 || COMPOSE=\"docker-compose\";";
+                var pullCmd = composeSelect + " $COMPOSE -f /opt/wireguard/docker-compose.yml pull";
+                await _ssh.RunCommandAsync(pullCmd, TimeSpan.FromMinutes(15), ct);
+                var startCmd = composeSelect + " $COMPOSE -f /opt/wireguard/docker-compose.yml up -d";
+                var (exitUp, stdoutUp, stderrUp) = await _ssh.RunCommandAsync(startCmd, TimeSpan.FromMinutes(10), ct);
                 if (exitUp != 0)
                 {
                     throw new Exception($"docker compose up failed: {stderrUp}\n{stdoutUp}");
                 }
 
+                // Verify container is running (with small backoff retries)
+                LogLine("Verifying container is running...");
+                var inspectCmd = "docker inspect -f '{{.State.Running}}' wireguard 2>/dev/null | tr -d '\r'";
+                int exitInspect = 0; string outInspect = string.Empty; string errInspect = string.Empty;
+                var runningOk = false;
+                for (int attempt = 0; attempt < 3 && !runningOk; attempt++)
+                {
+                    if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    (exitInspect, outInspect, errInspect) = await _ssh.RunCommandAsync(inspectCmd, TimeSpan.FromSeconds(120), ct);
+                    runningOk = exitInspect == 0 && string.Equals((outInspect ?? string.Empty).Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                }
+                if (!runningOk)
+                {
+                    // Show docker ps for context then fail
+                    var (_, outPsErr, errPsErr) = await _ssh.RunCommandAsync("docker ps -a --filter name=^wireguard$", TimeSpan.FromSeconds(60), ct);
+                    throw new Exception($"WireGuard container is not running: {errInspect}\ninspect: {outInspect}\nps: {errPsErr}\n{outPsErr}");
+                }
+
                 LogLine("docker ps output:");
-                var (exitPs, stdoutPs, stderrPs) = await _ssh.RunCommandAsync("docker ps", TimeSpan.FromSeconds(30), ct);
+                var (exitPs, stdoutPs, stderrPs) = await _ssh.RunCommandAsync("docker ps", TimeSpan.FromSeconds(60), ct);
                 foreach (var l in (stdoutPs ?? string.Empty).Split('\n'))
                 {
                     var line = l.TrimEnd();

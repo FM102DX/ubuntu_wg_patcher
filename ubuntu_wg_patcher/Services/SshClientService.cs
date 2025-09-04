@@ -32,15 +32,27 @@ namespace ubuntu_wg_patcher.Services
         {
             await Task.Run(() =>
             {
+                // Connection/handshake timeout: 60s (recommended 15–60s)
                 var connInfo = new PasswordConnectionInfo(host, port, username, password)
                 {
-                    Timeout = TimeSpan.FromSeconds(15)
+                    Timeout = TimeSpan.FromSeconds(60)
                 };
-                _ssh = new SshClient(connInfo);
-                _ssh.ConnectionInfo.RetryAttempts = 2;
+
+                // Create SSH with robust timeouts and keep-alives
+                _ssh = new SshClient(connInfo)
+                {
+                    // KeepAlive to prevent NAT/firewall idle disconnects: 15 seconds (recommended 10–30s)
+                    KeepAliveInterval = TimeSpan.FromSeconds(15)
+                };
+                _ssh.ConnectionInfo.RetryAttempts = 3;
                 _ssh.Connect();
 
-                _sftp = new SftpClient(connInfo);
+                // SFTP with similar settings
+                _sftp = new SftpClient(connInfo)
+                {
+                    OperationTimeout = TimeSpan.FromMinutes(10),
+                    KeepAliveInterval = TimeSpan.FromSeconds(15)
+                };
                 _sftp.Connect();
             }, ct);
         }
@@ -48,22 +60,39 @@ namespace ubuntu_wg_patcher.Services
         public async Task<(int ExitCode, string Stdout, string Stderr)> RunCommandAsync(string command, TimeSpan? timeout, CancellationToken ct)
         {
             if (_ssh == null) throw new InvalidOperationException("SSH client not connected");
-            return await Task.Run(() =>
+            var attempts = 0;
+            while (true)
             {
-                CommandExecuting?.Invoke(command);
-                using var cmd = _ssh.CreateCommand(command);
-                if (timeout.HasValue) cmd.CommandTimeout = timeout.Value;
-                var asyncResult = cmd.BeginExecute();
-                while (!asyncResult.IsCompleted)
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
-                    Thread.Sleep(50);
+                    return await Task.Run(() =>
+                    {
+                        CommandExecuting?.Invoke(command);
+                        using var cmd = _ssh.CreateCommand(command);
+                        // Command timeout: use provided value, else fall back to generous default 6 minutes
+                        cmd.CommandTimeout = timeout ?? TimeSpan.FromMinutes(6);
+                        var asyncResult = cmd.BeginExecute();
+                        while (!asyncResult.IsCompleted)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            Thread.Sleep(50);
+                        }
+                        // Ensure command is finalized and output streams are flushed
+                        cmd.EndExecute(asyncResult);
+                        var stdout = cmd.Result;
+                        var stderr = cmd.Error;
+                        var exit = cmd.ExitStatus;
+                        return (exit, stdout, stderr);
+                    }, ct);
                 }
-                var stdout = cmd.Result;
-                var stderr = cmd.Error;
-                var exit = cmd.ExitStatus;
-                return (exit, stdout, stderr);
-            }, ct);
+                catch (SshOperationTimeoutException) when (attempts++ == 0)
+                {
+                    // One quick retry: reconnect if needed, then retry once
+                    try { if (_ssh != null && !_ssh.IsConnected) _ssh.Connect(); } catch { }
+                    await Task.Delay(250, ct);
+                    continue;
+                }
+            }
         }
 
         public async Task UploadTextAsync(string remotePath, string content, CancellationToken ct)
@@ -131,14 +160,14 @@ namespace ubuntu_wg_patcher.Services
 
         public async Task<string> GetPublicIpAsync(CancellationToken ct)
         {
-            var (code, stdout, _) = await RunCommandAsync("curl -s https://api.ipify.org", TimeSpan.FromSeconds(20), ct);
+            var (code, stdout, _) = await RunCommandAsync("curl -s --max-time 60 https://api.ipify.org", TimeSpan.FromSeconds(60), ct);
             if (code != 0) return string.Empty;
             return stdout.Trim();
         }
 
         public async Task<string> GetGeoJsonAsync(CancellationToken ct)
         {
-            var (code, stdout, _) = await RunCommandAsync("curl -s https://ipinfo.io/json", TimeSpan.FromSeconds(30), ct);
+            var (code, stdout, _) = await RunCommandAsync("curl -s --max-time 60 https://ipinfo.io/json", TimeSpan.FromSeconds(60), ct);
             if (code != 0) return string.Empty;
             return stdout.Trim();
         }

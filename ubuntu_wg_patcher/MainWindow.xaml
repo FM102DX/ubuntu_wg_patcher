@@ -70,8 +70,10 @@
 
                     <TextBlock Grid.Row="7" Grid.Column="0" Text="Export folder" VerticalAlignment="Center" Margin="0,0,8,8"/>
                     <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBox Width="Auto" Text="{Binding ExportPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="420"/>
-                        <Button Content="Browse..." Margin="8,0,0,0" Command="{Binding BrowseExportPathCommand}"/>
+                        <TextBox Width="360" Text="{Binding ExportPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="280"/>
+                        <Button Width="34" Height="28" Margin="8,0,0,0" Command="{Binding BrowseExportPathCommand}" ToolTip="Select export folder">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" FontSize="16" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Button>
                     </StackPanel>
 
                     <!-- Spacer row (Row 8) pushes buttons to bottom -->
@@ -80,7 +82,6 @@
                     <!-- Bottom-right action buttons -->
                     <StackPanel Grid.Row="9" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Content="Save" Width="100" Height="32" Command="{Binding SaveTempCommand}"/>
-                        <Button Content="Open logs" Margin="8,0,0,0" Width="110" Height="32" Command="{Binding OpenLogsFolderCommand}"/>
                         <Button Content="Open folder" Margin="8,0,0,0" Width="120" Height="32" Command="{Binding OpenExportFolderCommand}"/>
                         <Button Content="START" Margin="8,0,0,0" Width="120" Height="36" Command="{Binding StartCommand}"/>
                     </StackPanel>
@@ -134,7 +135,14 @@
                             </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
-                    <TextBlock Grid.Row="2" Text="{Binding LogFilePath, StringFormat=Log file: {0}}" Foreground="#6b7280"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{Binding LogFilePath, StringFormat=Log file: {0}}" Foreground="#6b7280" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Open logs" Margin="8,0,0,0" Width="110" Height="28" Command="{Binding OpenLogsFolderCommand}"/>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
