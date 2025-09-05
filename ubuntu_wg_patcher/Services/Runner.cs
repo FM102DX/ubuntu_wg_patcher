@@ -243,7 +243,16 @@ namespace ubuntu_wg_patcher.Services
                 {
                     if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(5), ct);
                     (exitInspect, outInspect, errInspect) = await _ssh.RunCommandAsync(inspectCmd, TimeSpan.FromSeconds(120), ct);
+                    // Log exactly what we inspected this attempt
+                    var outTrim = (outInspect ?? string.Empty).Trim();
+                    var errTrim = (errInspect ?? string.Empty).Trim();
+                    LogLine($"inspect attempt {attempt + 1}: exit={exitInspect}, out='{outTrim}', err='{errTrim}'");
                     runningOk = exitInspect == 0 && string.Equals((outInspect ?? string.Empty).Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                }
+                if (runningOk)
+                {
+                    var outTrim = (outInspect ?? string.Empty).Trim();
+                    LogLine($"Verify OK: docker inspect indicates running (out='{outTrim}', exit={exitInspect})");
                 }
                 if (!runningOk)
                 {

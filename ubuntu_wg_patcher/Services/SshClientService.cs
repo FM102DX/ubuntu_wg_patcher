@@ -107,36 +107,67 @@ namespace ubuntu_wg_patcher.Services
 
         public async Task<(int ExitCode, string Stdout, string Stderr)> RunCommandAsync(string command, TimeSpan? timeout, CancellationToken ct)
         {
-            if (_ssh == null || !_ssh.IsConnected)
-            {
-                // Attempt to establish or re-establish connection before running a command
-                ConnectOrReconnect();
-            }
             var attempts = 0;
             const int maxAttempts = 3; // initial try + up to 2 retries
             while (true)
             {
+                // Pin a client instance for this attempt under the connection lock
+                SshClient? client;
+                lock (_connLock)
+                {
+                    if (_ssh == null || !_ssh.IsConnected)
+                    {
+                        ConnectOrReconnect();
+                    }
+                    client = _ssh;
+                }
+
                 try
                 {
                     return await Task.Run(() =>
                     {
                         CommandExecuting?.Invoke(command);
-                        using var cmd = _ssh.CreateCommand(command);
-                        // Command timeout: use provided value or the global default
-                        cmd.CommandTimeout = timeout ?? DefaultCommandTimeout;
-                        var asyncResult = cmd.BeginExecute();
-                        while (!asyncResult.IsCompleted)
+                        if (client == null) throw new InvalidOperationException("SSH client not connected");
+                        // Create the command under lock to avoid concurrent dispose during CreateCommand
+                        Renci.SshNet.SshCommand cmd;
+                        lock (_connLock)
                         {
-                            ct.ThrowIfCancellationRequested();
-                            Thread.Sleep(50);
+                            cmd = client.CreateCommand(command);
                         }
-                        // Ensure command is finalized and output streams are flushed
-                        cmd.EndExecute(asyncResult);
-                        var stdout = cmd.Result;
-                        var stderr = cmd.Error;
-                        var exit = cmd.ExitStatus;
-                        return (exit, stdout, stderr);
+                        using (cmd)
+                        {
+                            // Command timeout: use provided value or the global default
+                            cmd.CommandTimeout = timeout ?? DefaultCommandTimeout;
+                            var asyncResult = cmd.BeginExecute();
+                            while (!asyncResult.IsCompleted)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                Thread.Sleep(50);
+                            }
+                            // Ensure command is finalized and output streams are flushed
+                            cmd.EndExecute(asyncResult);
+                            var stdout = cmd.Result;
+                            var stderr = cmd.Error;
+                            var exit = cmd.ExitStatus;
+                            return (exit, stdout, stderr);
+                        }
                     }, ct);
+                }
+                catch (ObjectDisposedException) when (attempts++ < maxAttempts - 1)
+                {
+                    // Client was disposed concurrently; force a fresh reconnect and retry
+                    try { ConnectOrReconnect(forceNew: true); } catch { }
+                    await Task.Delay(400, ct);
+                    continue;
+                }
+                catch (InvalidOperationException ex) when (attempts++ < maxAttempts - 1 &&
+                                                          (ex.Message?.IndexOf("not connected", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                           ex.Message?.IndexOf("disposed", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    // Treat as transient connectivity; reconnect and retry
+                    try { ConnectOrReconnect(forceNew: true); } catch { }
+                    await Task.Delay(400, ct);
+                    continue;
                 }
                 catch (SshOperationTimeoutException) when (attempts++ < maxAttempts - 1)
                 {
