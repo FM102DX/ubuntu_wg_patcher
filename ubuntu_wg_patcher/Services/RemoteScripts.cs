@@ -35,6 +35,15 @@ namespace ubuntu_wg_patcher.Services
             }
             sb.AppendLine("EOF");
             sb.AppendLine("sysctl -p /etc/sysctl.d/99-wg.conf || true");
+            // Tune SSH server keep-alive/timeouts to prevent idle disconnects
+            sb.AppendLine("# Tune SSH server keep-alive/timeouts to prevent idle drops");
+            sb.AppendLine("if [ -f /etc/ssh/sshd_config ]; then");
+            sb.AppendLine("  cp -n /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null || true");
+            sb.AppendLine("  if grep -qE '^#?ClientAliveInterval' /etc/ssh/sshd_config; then sed -i -E 's/^#?ClientAliveInterval\\s+.*/ClientAliveInterval 30/' /etc/ssh/sshd_config; else echo 'ClientAliveInterval 30' >> /etc/ssh/sshd_config; fi");
+            sb.AppendLine("  if grep -qE '^#?ClientAliveCountMax' /etc/ssh/sshd_config; then sed -i -E 's/^#?ClientAliveCountMax\\s+.*/ClientAliveCountMax 6/' /etc/ssh/sshd_config; else echo 'ClientAliveCountMax 6' >> /etc/ssh/sshd_config; fi");
+            sb.AppendLine("  if grep -qE '^#?TCPKeepAlive' /etc/ssh/sshd_config; then sed -i -E 's/^#?TCPKeepAlive\\s+.*/TCPKeepAlive yes/' /etc/ssh/sshd_config; else echo 'TCPKeepAlive yes' >> /etc/ssh/sshd_config; fi");
+            sb.AppendLine("  systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || service ssh reload 2>/dev/null || service sshd reload 2>/dev/null || true");
+            sb.AppendLine("fi");
             sb.AppendLine("# IFACE=$(ip -4 route ls default | awk '{print $5}' | head -n1)");
             sb.AppendLine("# if ! iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE 2>/dev/null; then");
             sb.AppendLine("#   iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE");

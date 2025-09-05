@@ -118,6 +118,10 @@
                                     <DataTrigger Binding="{Binding Level}" Value="Success">
                                         <Setter Property="Foreground" Value="#10b981"/>
                                     </DataTrigger>
+                                    <DataTrigger Binding="{Binding Level}" Value="SuccessMsg">
+                                        <Setter Property="Foreground" Value="Black"/>
+                                        <Setter Property="Background" Value="#86efac"/>
+                                    </DataTrigger>
                                     <DataTrigger Binding="{Binding Level}" Value="Error">
                                         <Setter Property="Foreground" Value="#ef4444"/>
                                     </DataTrigger>

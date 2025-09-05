@@ -7,6 +7,7 @@ namespace ubuntu_wg_patcher.Models
         Info,
         Command,
         Success,
+        SuccessMsg,
         Error
     }
 

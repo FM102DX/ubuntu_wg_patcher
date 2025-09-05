@@ -193,6 +193,8 @@ namespace ubuntu_wg_patcher.ViewModels
             if (string.IsNullOrWhiteSpace(message)) return LogLevel.Info;
             var t = message.Trim();
             var tl = t.ToLowerInvariant();
+            if (tl.StartsWith("successmsg:"))
+                return LogLevel.SuccessMsg;
             if (tl.StartsWith("cmd:"))
                 return LogLevel.Command;
             if (tl.StartsWith("error") || tl.Contains(" error") || tl.Contains(" failed") || tl.Contains(" fail"))

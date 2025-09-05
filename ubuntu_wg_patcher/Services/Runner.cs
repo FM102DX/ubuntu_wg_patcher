@@ -27,6 +27,10 @@ namespace ubuntu_wg_patcher.Services
             {
                 progress.Report(line);
             }
+            void SuccessMsg(string line)
+            {
+                progress.Report($"SuccessMsg: {line}");
+            }
 
             // Subscribe to SSH command logging so each executed command is reported once
             void onCmd(string cmd) => progress.Report($"CMD: {cmd}");
@@ -47,6 +51,20 @@ namespace ubuntu_wg_patcher.Services
                 {
                     throw new Exception($"preflight failed: {stderrP}\n{stdoutP}");
                 }
+
+                // Stage 0: Connected and got Ubuntu version (from preflight 'OS: ...')
+                try
+                {
+                    var osLine = (stdoutP ?? string.Empty)
+                        .Split('\n')
+                        .Select(l => l.TrimEnd())
+                        .FirstOrDefault(l => l.StartsWith("OS: ", StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrWhiteSpace(osLine))
+                        SuccessMsg($"Connected. {osLine}");
+                    else
+                        SuccessMsg("Connected to host");
+                }
+                catch { SuccessMsg("Connected to host"); }
 
                 // Print diagnostics output captured from the preflight script
                 LogLine("Diagnostics output:");
@@ -90,7 +108,13 @@ namespace ubuntu_wg_patcher.Services
                     else
                     {
                         LogLine($"Docker installed: {stdoutDv.Trim()}");
+                        SuccessMsg($"Docker OK: {stdoutDv.Trim()}"); // Stage 1
                     }
+                }
+                else
+                {
+                    var (_, outDv, _) = await _ssh.RunCommandAsync("docker --version", TimeSpan.FromSeconds(30), ct);
+                    SuccessMsg($"Docker OK: {outDv?.Trim()}"); // Stage 1
                 }
 
                 // Ensure Docker Compose is installed (one attempt), after Docker is present
@@ -136,23 +160,39 @@ namespace ubuntu_wg_patcher.Services
                             else
                             {
                                 LogLine($"Compose installed: {stdoutV1b.Trim()}");
+                                SuccessMsg($"Docker Compose OK: {stdoutV1b.Trim()}"); // Stage 2
                             }
                         }
                         else
                         {
                             LogLine($"Compose installed: {stdoutV1.Trim()}");
+                            SuccessMsg($"Docker Compose OK: {stdoutV1.Trim()}"); // Stage 2
                         }
                     }
                     else
                     {
                         var (_, stdoutC, stderrC) = await _ssh.RunCommandAsync("docker compose version", TimeSpan.FromSeconds(30), ct);
                         LogLine($"Compose installed: {stdoutC.Trim()} {stderrC.Trim()}");
+                        SuccessMsg($"Docker Compose OK: {stdoutC.Trim()} {stderrC.Trim()}"); // Stage 2
+                    }
+                }
+                else
+                {
+                    // Already present: report version and success state
+                    var (vPlugin, outPlugin, _) = await _ssh.RunCommandAsync("docker compose version", TimeSpan.FromSeconds(30), ct);
+                    if (vPlugin == 0)
+                        SuccessMsg($"Docker Compose OK: {outPlugin.Trim()}"); // Stage 2
+                    else
+                    {
+                        var (v1, outV1only, _) = await _ssh.RunCommandAsync("docker-compose --version", TimeSpan.FromSeconds(30), ct);
+                        if (v1 == 0) SuccessMsg($"Docker Compose OK: {outV1only.Trim()}");
+                        else SuccessMsg("Docker Compose OK");
                     }
                 }
                 // --- Remove existing WireGuard (container and directory) ---
                 LogLine("Removing existing WireGuard installation (container and directory)...");
                 var checkContainerCmd = "docker ps -aq -f name=^wireguard$";
-                var (_, outChk, errChk) = await _ssh.RunCommandAsync(checkContainerCmd, TimeSpan.FromSeconds(20), ct);
+                var (chkContainerCmdRes, outChk, errChk) = await _ssh.RunCommandAsync(checkContainerCmd, TimeSpan.FromSeconds(20), ct);
                 if (!string.IsNullOrWhiteSpace((outChk ?? string.Empty).Trim()))
                 {
                     LogLine("Existing container 'wireguard' found. Removing...");
@@ -171,6 +211,8 @@ namespace ubuntu_wg_patcher.Services
                 {
                     throw new Exception($"Failed to remove /opt/wireguard directory: {errDir}");
                 }
+                // Stage 3: WireGuard successfully removed (no container, no directory)
+                SuccessMsg("WireGuard removed");
 
                 // --- WireGuard section ---
                 LogLine("Preparing /opt/wireguard and docker-compose.yml...");
@@ -209,6 +251,8 @@ namespace ubuntu_wg_patcher.Services
                     var (_, outPsErr, errPsErr) = await _ssh.RunCommandAsync("docker ps -a --filter name=^wireguard$", TimeSpan.FromSeconds(60), ct);
                     throw new Exception($"WireGuard container is not running: {errInspect}\ninspect: {outInspect}\nps: {errPsErr}\n{outPsErr}");
                 }
+                // Stage 4: WireGuard successfully started
+                SuccessMsg("WireGuard started");
 
                 LogLine("docker ps output:");
                 var (exitPs, stdoutPs, stderrPs) = await _ssh.RunCommandAsync("docker ps", TimeSpan.FromSeconds(60), ct);
