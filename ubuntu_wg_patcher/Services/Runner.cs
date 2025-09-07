@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
@@ -30,6 +31,38 @@ namespace ubuntu_wg_patcher.Services
             void SuccessMsg(string line)
             {
                 progress.Report($"SuccessMsg: {line}");
+            }
+
+            // Wait for SSH TCP port reachability without relying on the current SSH session
+            async Task<bool> WaitForSshPortAsync(string host, int port, TimeSpan totalTimeout, CancellationToken token)
+            {
+                var deadline = DateTime.UtcNow + totalTimeout;
+                var attempt = 0;
+                while (DateTime.UtcNow < deadline)
+                {
+                    attempt++;
+                    try
+                    {
+                        using var tcp = new TcpClient();
+                        var connectTask = tcp.ConnectAsync(host, port);
+                        var finished = await Task.WhenAny(connectTask, Task.Delay(TimeSpan.FromSeconds(5), token)) == connectTask;
+                        if (finished && tcp.Connected)
+                        {
+                            LogLine($"SSH port reachable (attempt {attempt})");
+                            return true;
+                        }
+                        else
+                        {
+                            LogLine($"SSH port not reachable yet (attempt {attempt})");
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        LogLine($"SSH port connect exception (attempt {attempt})");
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(3), token);
+                }
+                return false;
             }
 
             // Subscribe to SSH command logging so each executed command is reported once
@@ -285,6 +318,9 @@ namespace ubuntu_wg_patcher.Services
                 var composeSelect = "COMPOSE=\"docker compose\"; docker compose version >/dev/null 2>&1 || COMPOSE=\"docker-compose\";";
                 var pullCmd = composeSelect + " $COMPOSE -f /opt/wireguard/docker-compose.yml pull";
                 await _ssh.RunCommandAsync(pullCmd, TimeSpan.FromMinutes(15), ct);
+                // Background post-start network snapshot (runs after a short delay)
+                var postStartDiag = "nohup sh -c \"sleep 3; { date; echo '--- ip route'; ip -4 route; echo '--- ip rule'; ip rule; echo '--- ip addr'; ip addr; echo '--- iptables'; iptables -S; echo '--- iptables nat'; iptables -t nat -S; } > /tmp/wg_after_start.txt 2>&1\" >/dev/null 2>&1 &";
+                await _ssh.RunCommandAsync(postStartDiag, TimeSpan.FromSeconds(10), ct);
                 // Failsafe: if the host becomes unreachable after starting the container,
                 // this background job will remove the container after 3 minutes unless we signal success.
                 var guardCmd = "nohup sh -c \"sleep 180; [ -f /tmp/wg_start_ok ] || docker rm -f wireguard\" >/dev/null 2>&1 &";
@@ -294,6 +330,28 @@ namespace ubuntu_wg_patcher.Services
                 if (exitUp != 0)
                 {
                     throw new Exception($"docker compose up failed: {stderrUp}\n{stdoutUp}");
+                }
+
+                // After starting the container, the host may reconfigure networking which can drop SSH.
+                // Wait up to 150s for SSH port to become reachable again, then continue.
+                LogLine("Waiting for SSH to stabilize after starting container...");
+                var sshBack = await WaitForSshPortAsync(session.Host, session.Port, TimeSpan.FromSeconds(150), ct);
+                if (!sshBack)
+                {
+                    LogLine("SSH did not recover within 150s. The failsafe will remove the container shortly.");
+                    throw new Exception("SSH did not recover within the stabilization window after starting WireGuard.");
+                }
+                // Cancel the failsafe guard and dump post-start diagnostics (if any)
+                await _ssh.RunCommandAsync("touch /tmp/wg_start_ok", TimeSpan.FromSeconds(10), ct);
+                var (_, outPostDiag, _) = await _ssh.RunCommandAsync("sed -n '1,200p' /tmp/wg_after_start.txt 2>/dev/null || true", TimeSpan.FromSeconds(30), ct);
+                if (!string.IsNullOrWhiteSpace(outPostDiag))
+                {
+                    LogLine("diag: post-start network snapshot (first 200 lines):");
+                    foreach (var l in (outPostDiag ?? string.Empty).Split('\n'))
+                    {
+                        var line = l.TrimEnd();
+                        if (!string.IsNullOrWhiteSpace(line)) LogLine(line);
+                    }
                 }
 
                 // Verify container is running (with small backoff retries)
