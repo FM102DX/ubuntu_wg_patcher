@@ -28,6 +28,8 @@ namespace ubuntu_wg_patcher.Services
         private SftpClient? _sftp;
         private PasswordConnectionInfo? _connInfo;
         private readonly object _connLock = new();
+        private int _activeCommands = 0;
+        private readonly List<(SshClient? ssh, SftpClient? sftp)> _zombies = new();
 
         public event Action<string>? CommandExecuting;
         // Default command-level timeout used when a specific timeout is not provided
@@ -37,14 +39,30 @@ namespace ubuntu_wg_patcher.Services
         {
             await Task.Run(() =>
             {
-                // Connection/handshake timeout: 60s (recommended 15–60s)
+                // Connection/handshake timeout: 30s (shorter to allow more retries during network disruption)
                 _connInfo = new PasswordConnectionInfo(host, port, username, password)
                 {
-                    Timeout = TimeSpan.FromSeconds(60)
+                    Timeout = TimeSpan.FromSeconds(30)
                 };
                 // Always create fresh clients on initial Connect
                 ConnectOrReconnect(forceNew: true);
             }, ct);
+        }
+
+        private static bool IsConnectedSafe(SshClient? client)
+        {
+            if (client == null) return false;
+            try { return client.IsConnected; }
+            catch (ObjectDisposedException) { return false; }
+            catch { return false; }
+        }
+
+        private static bool IsConnectedSafe(SftpClient? client)
+        {
+            if (client == null) return false;
+            try { return client.IsConnected; }
+            catch (ObjectDisposedException) { return false; }
+            catch { return false; }
         }
 
         private void ConnectOrReconnect(bool forceNew = false)
@@ -54,36 +72,51 @@ namespace ubuntu_wg_patcher.Services
 
             lock (_connLock)
             {
-                if (!forceNew && _ssh != null && _ssh.IsConnected)
+                if (!forceNew && IsConnectedSafe(_ssh))
                 {
                     // Already connected
                     return;
                 }
 
-                try { _ssh?.Dispose(); } catch { }
-                try { _sftp?.Dispose(); } catch { }
-
                 Exception? lastEx = null;
-                for (int attempt = 0; attempt < 3; attempt++)
+                // More attempts with shorter timeout to ride out temporary network changes
+                for (int attempt = 0; attempt < 8; attempt++)
                 {
+                    SshClient? newSsh = null; SftpClient? newSftp = null;
                     try
                     {
-                        // Create SSH with robust timeouts and keep-alives
-                        _ssh = new SshClient(_connInfo)
+                        // Create new clients with robust timeouts and keep-alives
+                        newSsh = new SshClient(_connInfo)
                         {
-                            // KeepAlive to prevent NAT/firewall idle disconnects: 15 seconds (recommended 10–30s)
                             KeepAliveInterval = TimeSpan.FromSeconds(15)
                         };
-                        _ssh.ConnectionInfo.RetryAttempts = 3;
-                        _ssh.Connect();
+                        newSsh.ConnectionInfo.RetryAttempts = 3;
+                        newSsh.Connect();
 
-                        // SFTP with similar settings
-                        _sftp = new SftpClient(_connInfo)
+                        newSftp = new SftpClient(_connInfo)
                         {
                             OperationTimeout = TimeSpan.FromMinutes(10),
                             KeepAliveInterval = TimeSpan.FromSeconds(15)
                         };
-                        _sftp.Connect();
+                        newSftp.Connect();
+
+                        // Swap-in new clients; defer disposing previous if an operation is active
+                        var oldSsh = _ssh; var oldSftp = _sftp;
+                        _ssh = newSsh; _sftp = newSftp;
+                        newSsh = null; newSftp = null; // ownership transferred
+
+                        if (oldSsh != null || oldSftp != null)
+                        {
+                            if (System.Threading.Interlocked.CompareExchange(ref _activeCommands, 0, 0) > 0)
+                            {
+                                _zombies.Add((oldSsh, oldSftp));
+                            }
+                            else
+                            {
+                                try { oldSsh?.Dispose(); } catch { }
+                                try { oldSftp?.Dispose(); } catch { }
+                            }
+                        }
 
                         // success
                         return;
@@ -91,8 +124,8 @@ namespace ubuntu_wg_patcher.Services
                     catch (Exception ex)
                     {
                         lastEx = ex;
-                        try { _ssh?.Dispose(); } catch { }
-                        try { _sftp?.Dispose(); } catch { }
+                        try { newSsh?.Dispose(); } catch { }
+                        try { newSftp?.Dispose(); } catch { }
                         if (attempt < 2)
                         {
                             Thread.Sleep(500 + attempt * 500);
@@ -102,6 +135,22 @@ namespace ubuntu_wg_patcher.Services
                     }
                 }
                 if (lastEx != null) throw lastEx;
+            }
+        }
+
+        private void DisposeZombiesIfIdle()
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _activeCommands, 0, 0) == 0)
+            {
+                lock (_connLock)
+                {
+                    foreach (var (ssh, sftp) in _zombies)
+                    {
+                        try { ssh?.Dispose(); } catch { }
+                        try { sftp?.Dispose(); } catch { }
+                    }
+                    _zombies.Clear();
+                }
             }
         }
 
@@ -115,13 +164,15 @@ namespace ubuntu_wg_patcher.Services
                 SshClient? client;
                 lock (_connLock)
                 {
-                    if (_ssh == null || !_ssh.IsConnected)
+                    if (!IsConnectedSafe(_ssh))
                     {
                         ConnectOrReconnect();
                     }
+                    // Mark an active command before exposing the pinned client,
+                    // so ConnectOrReconnect will not dispose it while we prepare.
+                    System.Threading.Interlocked.Increment(ref _activeCommands);
                     client = _ssh;
                 }
-
                 try
                 {
                     return await Task.Run(() =>
@@ -136,12 +187,17 @@ namespace ubuntu_wg_patcher.Services
                         }
                         using (cmd)
                         {
-                            // Command timeout: use provided value or the global default
-                            cmd.CommandTimeout = timeout ?? DefaultCommandTimeout;
+                            // Start async execution
                             var asyncResult = cmd.BeginExecute();
+                            // Our own deadline-based wait (do NOT use cmd.CommandTimeout)
+                            DateTime? deadline = timeout.HasValue ? DateTime.UtcNow + timeout.Value : (DateTime?)null;
                             while (!asyncResult.IsCompleted)
                             {
                                 ct.ThrowIfCancellationRequested();
+                                if (deadline.HasValue && DateTime.UtcNow >= deadline.Value)
+                                {
+                                    throw new SshOperationTimeoutException($"Command timed out after {timeout.Value}.");
+                                }
                                 Thread.Sleep(50);
                             }
                             // Ensure command is finalized and output streams are flushed
@@ -190,35 +246,58 @@ namespace ubuntu_wg_patcher.Services
                     await Task.Delay(500, ct);
                     continue;
                 }
+                finally
+                {
+                    System.Threading.Interlocked.Decrement(ref _activeCommands);
+                    DisposeZombiesIfIdle();
+                }
             }
         }
 
         public async Task UploadTextAsync(string remotePath, string content, CancellationToken ct)
         {
-            if (_sftp == null || !_sftp.IsConnected)
+            System.Threading.Interlocked.Increment(ref _activeCommands);
+            try
             {
-                ConnectOrReconnect();
-                if (_sftp == null || !_sftp.IsConnected) throw new InvalidOperationException("SFTP client not connected");
+                if (!IsConnectedSafe(_sftp))
+                {
+                    ConnectOrReconnect();
+                    if (!IsConnectedSafe(_sftp)) throw new InvalidOperationException("SFTP client not connected");
+                }
+                // Normalize to LF to prevent bash errors like: set: -\r: invalid option
+                var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
+                using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(normalized));
+                await Task.Run(() =>
+                {
+                    var dir = Path.GetDirectoryName(remotePath)!.Replace("\\", "/");
+                    EnsureAllDirectories(dir);
+                    _sftp!.UploadFile(ms, remotePath, true);
+                }, ct);
             }
-            // Normalize to LF to prevent bash errors like: set: -\r: invalid option
-            var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
-            using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(normalized));
-            await Task.Run(() =>
+            finally
             {
-                var dir = Path.GetDirectoryName(remotePath)!.Replace("\\", "/");
-                EnsureAllDirectories(dir);
-                _sftp!.UploadFile(ms, remotePath, true);
-            }, ct);
+                System.Threading.Interlocked.Decrement(ref _activeCommands);
+                DisposeZombiesIfIdle();
+            }
         }
 
         public async Task EnsureDirectoryAsync(string remoteDir, CancellationToken ct)
         {
-            if (_sftp == null || !_sftp.IsConnected)
+            System.Threading.Interlocked.Increment(ref _activeCommands);
+            try
             {
-                ConnectOrReconnect();
-                if (_sftp == null || !_sftp.IsConnected) throw new InvalidOperationException("SFTP client not connected");
+                if (!IsConnectedSafe(_sftp))
+                {
+                    ConnectOrReconnect();
+                    if (!IsConnectedSafe(_sftp)) throw new InvalidOperationException("SFTP client not connected");
+                }
+                await Task.Run(() => EnsureAllDirectories(remoteDir.Replace("\\", "/")), ct);
             }
-            await Task.Run(() => EnsureAllDirectories(remoteDir.Replace("\\", "/")), ct);
+            finally
+            {
+                System.Threading.Interlocked.Decrement(ref _activeCommands);
+                DisposeZombiesIfIdle();
+            }
         }
 
         private void EnsureAllDirectories(string remoteDir)
@@ -238,34 +317,43 @@ namespace ubuntu_wg_patcher.Services
 
         public async Task<List<string>> DownloadPeerConfigsAsync(string remoteConfigRoot, string localExportDir, CancellationToken ct)
         {
-            if (_sftp == null || !_sftp.IsConnected)
+            System.Threading.Interlocked.Increment(ref _activeCommands);
+            try
             {
-                ConnectOrReconnect();
-                if (_sftp == null || !_sftp.IsConnected) throw new InvalidOperationException("SFTP client not connected");
-            }
-            return await Task.Run(() =>
-            {
-                Directory.CreateDirectory(localExportDir);
-                var result = new List<string>();
-                var root = remoteConfigRoot.Replace("\\", "/");
-                var entries = _sftp.ListDirectory(root);
-                foreach (var e in entries)
+                if (!IsConnectedSafe(_sftp))
                 {
-                    if (e.IsDirectory && e.Name.StartsWith("peer", StringComparison.OrdinalIgnoreCase))
+                    ConnectOrReconnect();
+                    if (!IsConnectedSafe(_sftp)) throw new InvalidOperationException("SFTP client not connected");
+                }
+                return await Task.Run(() =>
+                {
+                    Directory.CreateDirectory(localExportDir);
+                    var result = new List<string>();
+                    var root = remoteConfigRoot.Replace("\\", "/");
+                    var entries = _sftp.ListDirectory(root);
+                    foreach (var e in entries)
                     {
-                        var peerDir = e.FullName;
-                        var files = _sftp.ListDirectory(peerDir).Where(f => !f.IsDirectory && f.Name.EndsWith(".conf", StringComparison.OrdinalIgnoreCase));
-                        foreach (var f in files)
+                        if (e.IsDirectory && e.Name.StartsWith("peer", StringComparison.OrdinalIgnoreCase))
                         {
-                            var localPath = Path.Combine(localExportDir, f.Name);
-                            using var fs = File.Create(localPath);
-                            _sftp.DownloadFile(f.FullName, fs);
-                            result.Add(localPath);
+                            var peerDir = e.FullName;
+                            var files = _sftp.ListDirectory(peerDir).Where(f => !f.IsDirectory && f.Name.EndsWith(".conf", StringComparison.OrdinalIgnoreCase));
+                            foreach (var f in files)
+                            {
+                                var localPath = Path.Combine(localExportDir, f.Name);
+                                using var fs = File.Create(localPath);
+                                _sftp.DownloadFile(f.FullName, fs);
+                                result.Add(localPath);
+                            }
                         }
                     }
-                }
-                return result;
-            }, ct);
+                    return result;
+                }, ct);
+            }
+            finally
+            {
+                System.Threading.Interlocked.Decrement(ref _activeCommands);
+                DisposeZombiesIfIdle();
+            }
         }
 
         public async Task<string> GetPublicIpAsync(CancellationToken ct)
@@ -286,6 +374,7 @@ namespace ubuntu_wg_patcher.Services
         {
             try { _ssh?.Dispose(); } catch { }
             try { _sftp?.Dispose(); } catch { }
+            DisposeZombiesIfIdle();
         }
     }
 }

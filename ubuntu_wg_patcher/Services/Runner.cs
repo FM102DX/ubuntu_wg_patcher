@@ -214,6 +214,64 @@ namespace ubuntu_wg_patcher.Services
                 // Stage 3: WireGuard successfully removed (no container, no directory)
                 SuccessMsg("WireGuard removed");
 
+                // Diagnostics snapshot before starting WireGuard (to see where it hangs if it does)
+                LogLine("Diagnostics: checking Docker and firewall state before start...");
+                try
+                {
+                    // 1) Measure responsiveness of Docker daemon: docker version
+                    var cmdTimeDockerVersion = "START=$(date +%s); docker version; EC=$?; END=$(date +%s); echo __ELAPSED__=$((END-START))s; exit $EC";
+                    var (exitDv, outDv, errDv) = await _ssh.RunCommandAsync(cmdTimeDockerVersion, TimeSpan.FromSeconds(30), ct);
+                    LogLine($"diag: docker version exit={exitDv}");
+                    foreach (var l in (outDv ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+                    foreach (var l in (errDv ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 2) Measure responsiveness of Docker daemon: docker info
+                    var cmdTimeDockerInfo = "START=$(date +%s); docker info; EC=$?; END=$(date +%s); echo __ELAPSED__=$((END-START))s; exit $EC";
+                    var (exitDi, outDi, errDi) = await _ssh.RunCommandAsync(cmdTimeDockerInfo, TimeSpan.FromSeconds(45), ct);
+                    LogLine($"diag: docker info exit={exitDi}");
+                    foreach (var l in (outDi ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+                    foreach (var l in (errDi ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 3) Recent docker service logs (if journalctl available)
+                    var cmdJournal = "journalctl -u docker -n 200 --no-pager 2>&1 || true";
+                    var (_, outJ, _) = await _ssh.RunCommandAsync(cmdJournal, TimeSpan.FromSeconds(45), ct);
+                    LogLine("diag: journalctl -u docker -n 200 --no-pager (last 200 lines):");
+                    foreach (var l in (outJ ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 4) Check docker.sock availability/queue
+                    var cmdSs = "ss -xl 2>/dev/null | grep -i docker.sock || true";
+                    var (_, outSs, _) = await _ssh.RunCommandAsync(cmdSs, TimeSpan.FromSeconds(20), ct);
+                    LogLine("diag: ss -xl | grep docker.sock:");
+                    foreach (var l in (outSs ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 5) Current docker containers (full names)
+                    var cmdPs = "docker ps -a --no-trunc | grep -i wireguard || true";
+                    var (_, outPs, _) = await _ssh.RunCommandAsync(cmdPs, TimeSpan.FromSeconds(20), ct);
+                    LogLine("diag: docker ps -a --no-trunc | grep -i wireguard:");
+                    foreach (var l in (outPs ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 6) iptables rules snapshot (first 50 lines)
+                    var cmdIpt = "iptables -S 2>&1 | head -n 50";
+                    var (_, outIpt, _) = await _ssh.RunCommandAsync(cmdIpt, TimeSpan.FromSeconds(20), ct);
+                    LogLine("diag: iptables -S | head -n 50:");
+                    foreach (var l in (outIpt ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    var cmdIptNat = "iptables -t nat -S 2>&1 | head -n 50";
+                    var (_, outIptNat, _) = await _ssh.RunCommandAsync(cmdIptNat, TimeSpan.FromSeconds(20), ct);
+                    LogLine("diag: iptables -t nat -S | head -n 50:");
+                    foreach (var l in (outIptNat ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+
+                    // 7) UFW status
+                    var cmdUfw = "ufw status verbose 2>&1 || true";
+                    var (_, outUfw, _) = await _ssh.RunCommandAsync(cmdUfw, TimeSpan.FromSeconds(20), ct);
+                    LogLine("diag: ufw status verbose:");
+                    foreach (var l in (outUfw ?? string.Empty).Split('\n')) { var line = l.TrimEnd(); if (!string.IsNullOrWhiteSpace(line)) LogLine(line); }
+                }
+                catch (Exception ex)
+                {
+                    LogLine($"diag: diagnostics block failed: {ex.Message}");
+                }
+
                 // --- WireGuard section ---
                 LogLine("Preparing /opt/wireguard and docker-compose.yml...");
                 await _ssh.EnsureDirectoryAsync("/opt/wireguard", ct);
@@ -227,6 +285,10 @@ namespace ubuntu_wg_patcher.Services
                 var composeSelect = "COMPOSE=\"docker compose\"; docker compose version >/dev/null 2>&1 || COMPOSE=\"docker-compose\";";
                 var pullCmd = composeSelect + " $COMPOSE -f /opt/wireguard/docker-compose.yml pull";
                 await _ssh.RunCommandAsync(pullCmd, TimeSpan.FromMinutes(15), ct);
+                // Failsafe: if the host becomes unreachable after starting the container,
+                // this background job will remove the container after 3 minutes unless we signal success.
+                var guardCmd = "nohup sh -c \"sleep 180; [ -f /tmp/wg_start_ok ] || docker rm -f wireguard\" >/dev/null 2>&1 &";
+                await _ssh.RunCommandAsync(guardCmd, TimeSpan.FromSeconds(10), ct);
                 var startCmd = composeSelect + " $COMPOSE -f /opt/wireguard/docker-compose.yml up -d";
                 var (exitUp, stdoutUp, stderrUp) = await _ssh.RunCommandAsync(startCmd, TimeSpan.FromMinutes(10), ct);
                 if (exitUp != 0)
@@ -236,7 +298,7 @@ namespace ubuntu_wg_patcher.Services
 
                 // Verify container is running (with small backoff retries)
                 LogLine("Verifying container is running...");
-                var inspectCmd = "docker inspect -f '{{.State.Running}}' wireguard 2>/dev/null | tr -d '\r'";
+                var inspectCmd = "docker inspect -f '{{.State.Running}}' wireguard 2>/dev/null";
                 int exitInspect = 0; string outInspect = string.Empty; string errInspect = string.Empty;
                 var runningOk = false;
                 for (int attempt = 0; attempt < 3 && !runningOk; attempt++)
@@ -253,6 +315,8 @@ namespace ubuntu_wg_patcher.Services
                 {
                     var outTrim = (outInspect ?? string.Empty).Trim();
                     LogLine($"Verify OK: docker inspect indicates running (out='{outTrim}', exit={exitInspect})");
+                    // Cancel the failsafe guard
+                    await _ssh.RunCommandAsync("touch /tmp/wg_start_ok", TimeSpan.FromSeconds(10), ct);
                 }
                 if (!runningOk)
                 {

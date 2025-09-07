@@ -44,6 +44,15 @@ namespace ubuntu_wg_patcher.Services
             sb.AppendLine("  if grep -qE '^#?TCPKeepAlive' /etc/ssh/sshd_config; then sed -i -E 's/^#?TCPKeepAlive\\s+.*/TCPKeepAlive yes/' /etc/ssh/sshd_config; else echo 'TCPKeepAlive yes' >> /etc/ssh/sshd_config; fi");
             sb.AppendLine("  systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || service ssh reload 2>/dev/null || service sshd reload 2>/dev/null || true");
             sb.AppendLine("fi");
+            // Ensure SSH (22/tcp) stays reachable even if firewall/iptables are adjusted by Docker/WireGuard
+            sb.AppendLine("# Ensure inbound SSH stays open");
+            sb.AppendLine("if command -v iptables >/dev/null 2>&1; then");
+            sb.AppendLine("  if ! iptables -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null; then iptables -I INPUT -p tcp --dport 22 -j ACCEPT; fi");
+            sb.AppendLine("fi");
+            sb.AppendLine("if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then");
+            sb.AppendLine("  ufw allow 22/tcp >/dev/null 2>&1 || true");
+            sb.AppendLine($"  ufw allow {wgPort}/udp >/dev/null 2>&1 || true");
+            sb.AppendLine("fi");
             sb.AppendLine("# IFACE=$(ip -4 route ls default | awk '{print $5}' | head -n1)");
             sb.AppendLine("# if ! iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE 2>/dev/null; then");
             sb.AppendLine("#   iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o \"$IFACE\" -j MASQUERADE");
