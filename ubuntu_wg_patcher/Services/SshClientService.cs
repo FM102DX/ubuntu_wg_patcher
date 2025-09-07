@@ -20,6 +20,7 @@ namespace ubuntu_wg_patcher.Services
         Task<List<string>> DownloadPeerConfigsAsync(string remoteConfigRoot, string localExportDir, CancellationToken ct);
         Task<string> GetPublicIpAsync(CancellationToken ct);
         Task<string> GetGeoJsonAsync(CancellationToken ct);
+        Task DownloadDirectoryAsync(string remoteDir, string localExportDir, CancellationToken ct);
     }
 
     public class SshClientService : ISshClientService
@@ -347,6 +348,52 @@ namespace ubuntu_wg_patcher.Services
                         }
                     }
                     return result;
+                }, ct);
+            }
+            finally
+            {
+                System.Threading.Interlocked.Decrement(ref _activeCommands);
+                DisposeZombiesIfIdle();
+            }
+        }
+
+        public async Task DownloadDirectoryAsync(string remoteDir, string localExportDir, CancellationToken ct)
+        {
+            System.Threading.Interlocked.Increment(ref _activeCommands);
+            try
+            {
+                if (!IsConnectedSafe(_sftp))
+                {
+                    ConnectOrReconnect();
+                    if (!IsConnectedSafe(_sftp)) throw new InvalidOperationException("SFTP client not connected");
+                }
+                await Task.Run(() =>
+                {
+                    var root = remoteDir.Replace("\\", "/");
+                    if (!Directory.Exists(localExportDir)) Directory.CreateDirectory(localExportDir);
+
+                    void CopyRecursive(string rDir, string lDir)
+                    {
+                        var entries = _sftp!.ListDirectory(rDir);
+                        foreach (var entry in entries)
+                        {
+                            if (entry.Name == "." || entry.Name == "..") continue;
+                            var remotePath = entry.FullName;
+                            var localPath = Path.Combine(lDir, entry.Name);
+                            if (entry.IsDirectory)
+                            {
+                                Directory.CreateDirectory(localPath);
+                                CopyRecursive(remotePath, localPath);
+                            }
+                            else
+                            {
+                                using var fs = File.Create(localPath);
+                                _sftp!.DownloadFile(remotePath, fs);
+                            }
+                        }
+                    }
+
+                    CopyRecursive(root, localExportDir);
                 }, ct);
             }
             finally

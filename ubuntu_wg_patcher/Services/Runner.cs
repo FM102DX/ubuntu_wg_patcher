@@ -74,7 +74,8 @@ namespace ubuntu_wg_patcher.Services
                 await _ssh.ConnectAsync(session.Host, session.Port, session.Login, session.Password, ct);
 
                 LogLine("Preflight checks and host configuration...");
-                var preflight = RemoteScripts.BuildPreflightScript(session.WgPort, session.DisableIPv6);
+                // Use port 443 for WireGuard to align with the new docker-compose
+                var preflight = RemoteScripts.BuildPreflightScript(443, session.DisableIPv6);
                 var tmpScript = "/tmp/wg_preflight.sh";
                 var fullScript = "#!/usr/bin/env bash\n" + preflight;
                 Log.Debug("---- BEGIN preflight.sh ----\n{Script}\n---- END preflight.sh ----", fullScript);
@@ -310,7 +311,8 @@ namespace ubuntu_wg_patcher.Services
                 await _ssh.EnsureDirectoryAsync("/opt/wireguard", ct);
 
                 var publicIp = await _ssh.GetPublicIpAsync(ct);
-                var compose = ComposeTemplate.Generate(publicIp, session.WgPort, session.Peers);
+                // Always generate compose with 7 peers as requested
+                var compose = ComposeTemplate.Generate(publicIp, session.WgPort, 7);
                 var composePath = "/opt/wireguard/docker-compose.yml";
                 await _ssh.UploadTextAsync(composePath, compose, ct);
 
@@ -384,6 +386,36 @@ namespace ubuntu_wg_patcher.Services
                 }
                 // Stage 4: WireGuard successfully started
                 SuccessMsg("WireGuard started");
+
+                // --- Export entire WireGuard folder to local export path ---
+                LogLine($"Exporting /opt/wireguard to local folder: {session.ExportPath} ...");
+                // Clean local export folder completely before copying
+                try
+                {
+                    if (Directory.Exists(session.ExportPath))
+                    {
+                        Directory.Delete(session.ExportPath, recursive: true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogLine($"WARN: failed to fully delete export folder: {ex.Message}");
+                }
+                try { Directory.CreateDirectory(session.ExportPath); } catch { }
+                var localWireguardRoot = Path.Combine(session.ExportPath, "wireguard");
+                try { Directory.CreateDirectory(localWireguardRoot); } catch { }
+                await _ssh.DownloadDirectoryAsync("/opt/wireguard", localWireguardRoot, ct);
+                try
+                {
+                    var confs = Directory.GetFiles(session.ExportPath, "*.conf", SearchOption.AllDirectories);
+                    if (confs.Length > 0)
+                    {
+                        LogLine("Exported .conf files:");
+                        foreach (var p in confs) LogLine(p);
+                    }
+                }
+                catch { }
+                SuccessMsg($"WireGuard folder exported to: {session.ExportPath}");
 
                 LogLine("docker ps output:");
                 var (exitPs, stdoutPs, stderrPs) = await _ssh.RunCommandAsync("docker ps", TimeSpan.FromSeconds(60), ct);

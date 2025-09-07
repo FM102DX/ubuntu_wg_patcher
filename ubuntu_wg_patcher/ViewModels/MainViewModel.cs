@@ -209,14 +209,14 @@ namespace ubuntu_wg_patcher.ViewModels
         {
             try
             {
-                if (!string.IsNullOrWhiteSpace(ExportPath))
+                var target = (!string.IsNullOrWhiteSpace(ExportPath) && Directory.Exists(ExportPath))
+                    ? ExportPath
+                    : "C:\\";
+                Process.Start(new ProcessStartInfo
                 {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = ExportPath,
-                        UseShellExecute = true
-                    });
-                }
+                    FileName = target,
+                    UseShellExecute = true
+                });
             }
             catch { }
         }
