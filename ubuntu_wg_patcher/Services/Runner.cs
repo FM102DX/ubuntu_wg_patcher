@@ -74,8 +74,7 @@ namespace ubuntu_wg_patcher.Services
                 await _ssh.ConnectAsync(session.Host, session.Port, session.Login, session.Password, ct);
 
                 LogLine("Preflight checks and host configuration...");
-                // Use port 443 for WireGuard to align with the new docker-compose
-                var preflight = RemoteScripts.BuildPreflightScript(443, session.DisableIPv6);
+                var preflight = RemoteScripts.BuildPreflightScript(51820, session.DisableIPv6);
                 var tmpScript = "/tmp/wg_preflight.sh";
                 var fullScript = "#!/usr/bin/env bash\n" + preflight;
                 Log.Debug("---- BEGIN preflight.sh ----\n{Script}\n---- END preflight.sh ----", fullScript);

@@ -22,19 +22,15 @@ namespace ubuntu_wg_patcher.Templates
             sb.AppendLine("      - PGID=0");
             sb.AppendLine("      - TZ=UTC");
             sb.AppendLine("      - SERVERURL=62.60.179.118");
-            sb.AppendLine("      - SERVERPORT=443");
-            sb.AppendLine("      - PEERS=peer7");
+            sb.AppendLine("      - SERVERPORT=51820");
+            sb.AppendLine("      - PEERS=7");
             sb.AppendLine("      - PEERDNS=1.1.1.1,8.8.8.8");
             sb.AppendLine("      - INTERNAL_SUBNET=10.13.13.0/24");
             sb.AppendLine("      - ALLOWEDIPS=0.0.0.0/0");
             sb.AppendLine("    volumes:");
             sb.AppendLine("      - /opt/wireguard/config:/config");
             sb.AppendLine("      - /lib/modules:/lib/modules");
-            sb.AppendLine("    sysctls:");
-            sb.AppendLine("      - net.ipv4.conf.all.src_valid_mark=1");
-            sb.AppendLine("      - net.ipv4.ip_forward=1");
-            sb.AppendLine("      - net.ipv6.conf.all.disable_ipv6=1");
-            sb.AppendLine("      - net.ipv6.conf.default.disable_ipv6=1");
+            // sysctls are applied at host level in preflight; setting them here with host network causes runc error
             sb.AppendLine("    restart: unless-stopped");
             return sb.ToString();
         }
