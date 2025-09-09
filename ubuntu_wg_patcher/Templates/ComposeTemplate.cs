@@ -21,9 +21,9 @@ namespace ubuntu_wg_patcher.Templates
             sb.AppendLine("      - PUID=0");
             sb.AppendLine("      - PGID=0");
             sb.AppendLine("      - TZ=UTC");
-            sb.AppendLine("      - SERVERURL=62.60.179.118");
-            sb.AppendLine("      - SERVERPORT=51820");
-            sb.AppendLine("      - PEERS=7");
+            sb.AppendLine($"      - SERVERURL={serverPublicIp}");
+            sb.AppendLine($"      - SERVERPORT={wgPort}");
+            sb.AppendLine($"      - PEERS={peers}");
             sb.AppendLine("      - PEERDNS=1.1.1.1,8.8.8.8");
             sb.AppendLine("      - INTERNAL_SUBNET=10.13.13.0/24");
             sb.AppendLine("      - ALLOWEDIPS=0.0.0.0/0");

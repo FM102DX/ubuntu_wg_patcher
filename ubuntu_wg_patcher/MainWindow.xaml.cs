@@ -25,8 +25,9 @@ namespace ubuntu_wg_patcher
         public MainWindow()
         {
             InitializeComponent();
-            var runner = new Runner(_ssh);
-            _vm = new MainViewModel(_storage, runner);
+            var wgRunner = new WireGuardRunner(_ssh);
+            var vlessRunner = new VlessRunner(_ssh);
+            _vm = new MainViewModel(_storage, wgRunner, vlessRunner);
             DataContext = _vm;
 
             Loaded += async (_, __) =>

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -17,25 +19,18 @@ namespace ubuntu_wg_patcher.ViewModels
     public partial class MainViewModel : ObservableObject
     {
         private readonly SessionStorage _storage;
-        private readonly Runner _runner;
+        private readonly Dictionary<ConfigurationType, IConfigRunner> _runners;
         private CancellationTokenSource? _cts;
 
-        [ObservableProperty]
-        private string host = string.Empty;
-        [ObservableProperty]
-        private int port = 22;
-        [ObservableProperty]
-        private string login = "root";
-        [ObservableProperty]
-        private string password = string.Empty;
-        [ObservableProperty]
-        private int wgPort = 51820;
-        [ObservableProperty]
-        private bool disableIPv6 = true;
-        [ObservableProperty]
-        private int peers = 3;
-        [ObservableProperty]
-        private string exportPath = string.Empty;
+        // Legacy single-config properties kept for backward compatibility with some commands; inputs now bind to SelectedConfig.*
+        [ObservableProperty] private string host = string.Empty;
+        [ObservableProperty] private int port = 22;
+        [ObservableProperty] private string login = "root";
+        [ObservableProperty] private string password = string.Empty;
+        [ObservableProperty] private int wgPort = 51820;
+        [ObservableProperty] private bool disableIPv6 = true;
+        [ObservableProperty] private int peers = 3;
+        [ObservableProperty] private string exportPath = string.Empty;
 
         [ObservableProperty]
         private int stepIndex = 0; // 0 input, 1 progress, 2 result
@@ -51,24 +46,34 @@ namespace ubuntu_wg_patcher.ViewModels
 
         public ObservableCollection<LogEntry> LogEntries { get; } = new();
 
-        public MainViewModel(SessionStorage storage, Runner runner)
+        public ObservableCollection<SessionParams> Configs { get; } = new();
+
+        [ObservableProperty]
+        private SessionParams? selectedConfig;
+
+        public Array ConfigTypes => Enum.GetValues(typeof(ConfigurationType));
+
+        public MainViewModel(SessionStorage storage, IConfigRunner wireGuardRunner, IConfigRunner vlessRunner)
         {
             _storage = storage;
-            _runner = runner;
+            _runners = new()
+            {
+                [ConfigurationType.WireGuard] = wireGuardRunner,
+                [ConfigurationType.VLESS] = vlessRunner
+            };
         }
 
         public async Task LoadLastSessionAsync()
         {
-            var last = await _storage.LoadAsync();
-            if (last == null) return;
-            Host = last.Host;
-            Port = last.Port;
-            Login = last.Login;
-            Password = last.Password;
-            WgPort = last.WgPort;
-            DisableIPv6 = last.DisableIPv6;
-            Peers = last.Peers;
-            ExportPath = last.ExportPath;
+            var list = await _storage.LoadListAsync();
+            Configs.Clear();
+            foreach (var c in list) Configs.Add(c);
+            if (Configs.Count == 0)
+            {
+                var def = new SessionParams { ConfigName = "Config 1", ConfigType = ConfigurationType.WireGuard };
+                Configs.Add(def);
+            }
+            SelectedConfig = Configs.FirstOrDefault();
         }
 
         [RelayCommand]
@@ -78,8 +83,9 @@ namespace ubuntu_wg_patcher.ViewModels
             dlg.Description = "Select export folder";
             try
             {
-                if (!string.IsNullOrWhiteSpace(ExportPath) && Directory.Exists(ExportPath))
-                    dlg.SelectedPath = ExportPath;
+                var path = SelectedConfig?.ExportPath ?? ExportPath;
+                if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                    dlg.SelectedPath = path;
                 else
                     dlg.SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             }
@@ -87,14 +93,19 @@ namespace ubuntu_wg_patcher.ViewModels
             dlg.ShowNewFolderButton = true;
             if (dlg.ShowDialog() == DialogResult.OK)
             {
-                ExportPath = dlg.SelectedPath;
+                if (SelectedConfig != null)
+                    SelectedConfig.ExportPath = dlg.SelectedPath;
+                else
+                    ExportPath = dlg.SelectedPath;
             }
         }
 
         [RelayCommand]
         private async Task StartAsync()
         {
-            if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Login) || string.IsNullOrWhiteSpace(ExportPath))
+            var cfg = SelectedConfig;
+            if (cfg == null) return;
+            if (string.IsNullOrWhiteSpace(cfg.Host) || string.IsNullOrWhiteSpace(cfg.Login) || string.IsNullOrWhiteSpace(cfg.ExportPath))
                 return;
 
             IsRunning = true;
@@ -102,19 +113,9 @@ namespace ubuntu_wg_patcher.ViewModels
 
             LogFilePath = LogService.CurrentLogFilePath ?? string.Empty;
 
-            var session = new SessionParams
-            {
-                Host = Host,
-                Port = Port,
-                Login = Login,
-                Password = Password,
-                WgPort = WgPort,
-                DisableIPv6 = DisableIPv6,
-                Peers = Peers,
-                ExportPath = ExportPath
-            };
-
-            await _storage.SaveAsync(session);
+            var session = cfg.Clone();
+            // Persist all current configs before run
+            await _storage.SaveListAsync(Configs);
 
             _cts = new CancellationTokenSource();
             var progress = new Progress<string>(s =>
@@ -124,7 +125,9 @@ namespace ubuntu_wg_patcher.ViewModels
 
             try
             {
-                var result = await _runner.RunAsync(session, progress, _cts.Token);
+                if (!_runners.TryGetValue(session.ConfigType, out var runner))
+                    throw new InvalidOperationException($"No runner registered for type {session.ConfigType}");
+                var result = await runner.RunAsync(session, progress, _cts.Token);
                 PublicIp = result.PublicIp;
                 GeoJson = result.GeoJson;
                 LogFilePath = result.LogFilePath;
@@ -144,19 +147,39 @@ namespace ubuntu_wg_patcher.ViewModels
         [RelayCommand]
         private async Task SaveTempAsync()
         {
-            var session = new SessionParams
+            await _storage.SaveTempListAsync(Configs);
+            AddLog($"Saved {Configs.Count} configurations to {_storage.TempFilePath}", LogLevel.Success);
+        }
+
+        [RelayCommand]
+        private void CreateConfig()
+        {
+            var idx = Configs.Count + 1;
+            var cfg = new SessionParams { ConfigName = $"Config {idx}", ConfigType = ConfigurationType.WireGuard };
+            Configs.Add(cfg);
+            SelectedConfig = cfg;
+        }
+
+        [RelayCommand]
+        private void DeleteConfig()
+        {
+            if (SelectedConfig == null) return;
+            var toRemove = SelectedConfig;
+            var index = Configs.IndexOf(toRemove);
+            if (index >= 0) Configs.RemoveAt(index);
+            if (Configs.Count == 0)
             {
-                Host = Host,
-                Port = Port,
-                Login = Login,
-                Password = Password,
-                WgPort = WgPort,
-                DisableIPv6 = DisableIPv6,
-                Peers = Peers,
-                ExportPath = ExportPath
-            };
-            await _storage.SaveTempAsync(session);
-            AddLog($"Saved session to {_storage.TempFilePath}", LogLevel.Success);
+                var def = new SessionParams { ConfigName = "Config 1", ConfigType = ConfigurationType.WireGuard };
+                Configs.Add(def);
+            }
+            SelectedConfig = Configs.FirstOrDefault();
+        }
+
+        [RelayCommand]
+        private async Task SaveAllAsync()
+        {
+            await _storage.SaveListAsync(Configs);
+            AddLog($"Saved {Configs.Count} configurations to {_storage.FilePath}", LogLevel.Success);
         }
 
         private void AddLog(string message, LogLevel? level = null)
@@ -209,8 +232,9 @@ namespace ubuntu_wg_patcher.ViewModels
         {
             try
             {
-                var target = (!string.IsNullOrWhiteSpace(ExportPath) && Directory.Exists(ExportPath))
-                    ? ExportPath
+                var path = SelectedConfig?.ExportPath ?? ExportPath;
+                var target = (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                    ? path
                     : "C:\\";
                 Process.Start(new ProcessStartInfo
                 {

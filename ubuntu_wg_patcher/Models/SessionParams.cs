@@ -1,37 +1,66 @@
 using System;
 using System.Text.Json.Serialization;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ubuntu_wg_patcher.Models
 {
-    public class SessionParams
+    public partial class SessionParams : ObservableObject
     {
+        [ObservableProperty]
+        [JsonPropertyName("ConfigName")]
+        private string configName = "Default";
+
+        [ObservableProperty]
+        [JsonPropertyName("ConfigType")]
+        private ConfigurationType configType = ConfigurationType.WireGuard;
+
+        [ObservableProperty]
         [JsonPropertyName("Host")]
-        public string Host { get; set; } = string.Empty;
+        private string host = string.Empty;
 
+        [ObservableProperty]
         [JsonPropertyName("Port")]
-        public int Port { get; set; } = 22;
+        private int port = 22;
 
+        [ObservableProperty]
         [JsonPropertyName("Login")]
-        public string Login { get; set; } = "root";
+        private string login = "root";
 
+        [ObservableProperty]
         [JsonPropertyName("Password")]
-        public string Password { get; set; } = string.Empty;
+        private string password = string.Empty;
 
+        [ObservableProperty]
         [JsonPropertyName("WgPort")]
-        public int WgPort { get; set; } = 51820;
+        private int wgPort = 51820;
 
+        [ObservableProperty]
         [JsonPropertyName("DisableIPv6")]
-        public bool DisableIPv6 { get; set; } = true;
+        private bool disableIPv6 = true;
 
+        [ObservableProperty]
         [JsonPropertyName("Peers")]
-        public int Peers { get; set; } = 3;
+        private int peers = 3;
 
+        [ObservableProperty]
         [JsonPropertyName("ExportPath")]
-        public string ExportPath { get; set; } = string.Empty;
+        private string exportPath = string.Empty;
 
         public SessionParams Clone()
         {
-            return (SessionParams)MemberwiseClone();
+            return new SessionParams
+            {
+                ConfigName = this.ConfigName,
+                ConfigType = this.ConfigType,
+                Host = this.Host,
+                Port = this.Port,
+                Login = this.Login,
+                Password = this.Password,
+                WgPort = this.WgPort,
+                DisableIPv6 = this.DisableIPv6,
+                Peers = this.Peers,
+                ExportPath = this.ExportPath
+            };
         }
     }
 }
