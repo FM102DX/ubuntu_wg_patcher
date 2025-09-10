@@ -21,6 +21,7 @@ namespace ubuntu_wg_patcher.Services
         Task<string> GetPublicIpAsync(CancellationToken ct);
         Task<string> GetGeoJsonAsync(CancellationToken ct);
         Task DownloadDirectoryAsync(string remoteDir, string localExportDir, CancellationToken ct);
+        Task DownloadFileAsync(string remotePath, string localPath, CancellationToken ct);
     }
 
     public class SshClientService : ISshClientService
@@ -48,6 +49,32 @@ namespace ubuntu_wg_patcher.Services
                 // Always create fresh clients on initial Connect
                 ConnectOrReconnect(forceNew: true);
             }, ct);
+        }
+
+        public async Task DownloadFileAsync(string remotePath, string localPath, CancellationToken ct)
+        {
+            System.Threading.Interlocked.Increment(ref _activeCommands);
+            try
+            {
+                if (!IsConnectedSafe(_sftp))
+                {
+                    ConnectOrReconnect();
+                    if (!IsConnectedSafe(_sftp)) throw new InvalidOperationException("SFTP client not connected");
+                }
+                await Task.Run(() =>
+                {
+                    var r = remotePath.Replace("\\", "/");
+                    var dir = Path.GetDirectoryName(localPath);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    using var fs = File.Create(localPath);
+                    _sftp!.DownloadFile(r, fs);
+                }, ct);
+            }
+            finally
+            {
+                System.Threading.Interlocked.Decrement(ref _activeCommands);
+                DisposeZombiesIfIdle();
+            }
         }
 
         private static bool IsConnectedSafe(SshClient? client)

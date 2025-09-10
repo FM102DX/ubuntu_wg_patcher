@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ubuntu_wg_patcher"
         mc:Ignorable="d"
-        Title="Remote Ubuntu WireGuard Patch" Height="560" Width="900">
+        Title="Remote Ubuntu WireGuard Patch" Height="680" Width="1200">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -51,9 +51,8 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                        <Button Content="Создать" Width="90" Height="28" Command="{Binding CreateConfigCommand}"/>
-                        <Button Content="Удалить" Width="90" Height="28" Margin="8,0,0,0" Command="{Binding DeleteConfigCommand}"/>
-                        <Button Content="Сохранить" Width="100" Height="28" Margin="8,0,0,0" Command="{Binding SaveAllCommand}"/>
+                        <Button Content="+" Width="40" Height="28" Command="{Binding CreateConfigCommand}"/>
+                        <Button Content="-" Width="40" Height="28" Margin="8,0,0,0" Command="{Binding DeleteConfigCommand}"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -62,8 +61,8 @@
             <Border Grid.Column="2" Padding="12" Background="#FFFFFF" CornerRadius="6" BorderBrush="#e5e7eb" BorderThickness="1">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="2*"/>
-                        <ColumnDefinition Width="3*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/> <!-- Row 0: Config name -->
@@ -83,43 +82,40 @@
 
                     <!-- New: Config name -->
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="0" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.ConfigName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="0" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.ConfigName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <!-- New: Config type -->
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Type" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <ComboBox Grid.Row="1" Grid.Column="1" Width="160" ItemsSource="{Binding ConfigTypes}" SelectedItem="{Binding SelectedConfig.ConfigType, Mode=TwoWay}" Margin="0,0,0,8"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1" Width="160" HorizontalAlignment="Left" ItemsSource="{Binding ConfigTypes}" SelectedItem="{Binding SelectedConfig.ConfigType, Mode=TwoWay}" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="Connection" FontWeight="Bold" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Host/IP" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="3" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.Host, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.Host, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="SSH Port" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="4" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.Port, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="4" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.Port, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="5" Grid.Column="0" Text="Login" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="5" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.Login, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.Login, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="6" Grid.Column="0" Text="Password" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="6" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.Password, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.Password, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <TextBlock Grid.Row="7" Grid.Column="0" Text="WG Port (UDP)" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="7" Grid.Column="1" Width="160" Text="{Binding SelectedConfig.WgPort, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBox Grid.Row="7" Grid.Column="1" Width="160" HorizontalAlignment="Left" Text="{Binding SelectedConfig.WgPort, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
 
                     <!-- IPv6 on its own row -->
                     <CheckBox Grid.Row="8" Grid.ColumnSpan="2" Content="Disable IPv6" IsChecked="{Binding SelectedConfig.DisableIPv6}" VerticalAlignment="Center" Margin="0,0,0,8"/>
 
                     <!-- Peers count row -->
                     <TextBlock Grid.Row="9" Grid.Column="0" Text="Peers count" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <TextBox Grid.Row="9" Grid.Column="1" Width="80" Text="{Binding SelectedConfig.Peers, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBox Grid.Row="9" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding SelectedConfig.Peers, UpdateSourceTrigger=PropertyChanged}"/>
 
                     <TextBlock Grid.Row="10" Grid.Column="0" Text="Export folder" VerticalAlignment="Center" Margin="0,0,8,8"/>
                     <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBox Width="200" Text="{Binding SelectedConfig.ExportPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="160"/>
-                        <Button Width="28" Height="28" Margin="8,0,0,0" Command="{Binding BrowseExportPathCommand}" ToolTip="Select export folder">
-                            <TextBlock Text="..." FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                        </Button>
-                        <Button Width="34" Height="28" Margin="8,0,0,0" Command="{Binding OpenExportFolderCommand}" ToolTip="Open folder in Explorer (falls back to C:\)">
+                        <TextBox Width="200" HorizontalAlignment="Left" Text="{Binding SelectedConfig.ExportPath, UpdateSourceTrigger=PropertyChanged}" MinWidth="160"/>
+                        <Button Width="34" Height="28" Margin="8,0,0,0" Command="{Binding BrowseExportPathCommand}" ToolTip="Select export folder">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" FontSize="16" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                         </Button>
                     </StackPanel>
@@ -127,11 +123,14 @@
                     <!-- Spacer row pushes buttons to bottom -->
                     <Grid Grid.Row="11" Grid.ColumnSpan="2"/>
 
-                    <!-- Bottom-right action buttons -->
-                    <StackPanel Grid.Row="12" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="Save" Width="100" Height="32" Command="{Binding SaveTempCommand}"/>
-                        <Button Content="Open folder" Margin="8,0,0,0" Width="120" Height="32" Command="{Binding OpenExportFolderCommand}"/>
-                        <Button Content="START" Margin="8,0,0,0" Width="120" Height="36" Command="{Binding StartCommand}"/>
+                    <!-- Bottom-left action buttons: vertical stack -->
+                    <StackPanel Grid.Row="12" Grid.ColumnSpan="2" Orientation="Vertical" HorizontalAlignment="Left">
+                        <Button Content="Smoke" Width="140" Height="30" Command="{Binding SmokeCommand}"/>
+                        <Button Content="Take d.compose" Width="140" Height="30" Margin="0,8,0,0" Command="{Binding TakeComposeCommand}"/>
+                        <Button Content="ServerInfo" Width="140" Height="30" Margin="0,8,0,0" Command="{Binding ServerInfoCommand}"/>
+                        <Button Content="Save" Width="140" Height="32" Margin="0,16,0,0" Command="{Binding SaveAllCommand}"/>
+                        <Button Content="Open folder" Width="140" Height="32" Margin="0,8,0,0" Command="{Binding OpenExportFolderCommand}"/>
+                        <Button Content="START" Width="140" Height="36" Margin="0,8,0,0" Command="{Binding StartCommand}"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -144,7 +143,14 @@
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="Log" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Log" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Очистить логи" Width="120" Height="26" Command="{Binding ClearLogsCommand}"/>
+                    </Grid>
                     <DataGrid Grid.Row="1"
                               ItemsSource="{Binding LogEntries}"
                               AutoGenerateColumns="False"
@@ -172,6 +178,10 @@
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Level}" Value="Error">
                                         <Setter Property="Foreground" Value="#ef4444"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Level}" Value="Fatal">
+                                        <Setter Property="Foreground" Value="Black"/>
+                                        <Setter Property="Background" Value="#ef4444"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>

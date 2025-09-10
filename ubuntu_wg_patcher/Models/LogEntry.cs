@@ -8,7 +8,8 @@ namespace ubuntu_wg_patcher.Models
         Command,
         Success,
         SuccessMsg,
-        Error
+        Error,
+        Fatal
     }
 
     public class LogEntry
