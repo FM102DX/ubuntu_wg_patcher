@@ -340,21 +340,52 @@ namespace ubuntu_wg_patcher.ViewModels
 
                 var detectCmd = string.Join(" ", new[]
                 {
-                    "if [ -f /opt/wireguard/docker-compose.yml ]; then echo /opt/wireguard/docker-compose.yml;",
-                    "elif [ -f /opt/wireguard/docker-compose.yaml ]; then echo /opt/wireguard/docker-compose.yaml;",
-                    "else echo NOT_FOUND; fi"
+                    "p=\"\";",
+                    "names='docker-compose.yml docker-compose.yaml compose.yml compose.yaml docker-compose compose';",
+                    "for base in /opt/wireguard /wireguard /root/wireguard /home/*/wireguard \"$HOME\"/wireguard ./wireguard; do",
+                    "for n in $names; do cand=\"$base/$n\"; if [ -f \"$cand\" ]; then p=\"$cand\"; break 2; fi; done; done;",
+                    "if [ -z \"$p\" ]; then for root in /root /opt /wireguard /home \"$HOME\" .; do",
+                    "f=$(find \"$root\" -maxdepth 3 -type f \\(" +
+                        " -iname '*compose*.yml' -o -iname '*compose*.yaml' -o -name 'docker-compose' -o -name 'compose' " +
+                        "\\) 2>/dev/null | head -n 1);",
+                    "if [ -n \"$f\" ]; then p=\"$f\"; break; fi; done; fi;",
+                    "if [ -z \"$p\" ]; then f=$(find / -maxdepth 6 -type f \\(" +
+                        " -iname '*compose*.yml' -o -iname '*compose*.yaml' -o -name 'docker-compose' -o -name 'compose' " +
+                        "\\) 2>/dev/null | head -n 1); if [ -n \"$f\" ]; then p=\"$f\"; fi; fi;",
+                    "echo \"${p:-NOT_FOUND}\""
                 });
-                var (exit, stdout, stderr) = await _ssh.RunCommandAsync(detectCmd, TimeSpan.FromSeconds(20), CancellationToken.None);
+                var bashWrapped = $"bash -lc '{detectCmd.Replace("'", "'\"'\"'")}'";
+                var (exit, stdout, stderr) = await _ssh.RunCommandAsync(bashWrapped, TimeSpan.FromSeconds(60), CancellationToken.None);
+                if (exit != 0)
+                {
+                    // Fallback to sh if bash is not available
+                    var shWrapped = $"sh -lc '{detectCmd.Replace("'", "'\"'\"'")}'";
+                    (exit, stdout, stderr) = await _ssh.RunCommandAsync(shWrapped, TimeSpan.FromSeconds(60), CancellationToken.None);
+                }
                 var remote = (stdout ?? string.Empty).Trim();
                 if (exit != 0 || string.IsNullOrWhiteSpace(remote) || remote.Equals("NOT_FOUND", StringComparison.OrdinalIgnoreCase))
                 {
-                    AddLog("Error: docker-compose file not found on server (/opt/wireguard).", LogLevel.Error);
+                    AddLog($"Error: docker-compose file not found on server (searched /opt/wireguard, /wireguard, /root/wireguard, /home/*/wireguard, $HOME/wireguard, ./wireguard and global find from /). Stderr: {stderr}", LogLevel.Error);
+                    try
+                    {
+                        var dbg = string.Join(" ", new[]
+                        {
+                            "bash -lc 'for d in /opt/wireguard /wireguard /root/wireguard /home/*/wireguard \"$HOME\"/wireguard ./wireguard; do echo \"-- $d:\"; ls -la \"$d\" 2>/dev/null || echo \"(no dir)\"; done'"
+                        });
+                        var (_, dbgOut, dbgErr) = await _ssh.RunCommandAsync(dbg, TimeSpan.FromSeconds(20), CancellationToken.None);
+                        var show = (dbgOut ?? string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(show)) AddLog(show);
+                        var showE = (dbgErr ?? string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(showE)) AddLog(showE);
+                    }
+                    catch { }
                     return;
                 }
 
                 Directory.CreateDirectory(cfg.ExportPath);
                 var safe = SanitizeFilePart(cfg.ConfigName);
                 var local = Path.Combine(cfg.ExportPath, $"docker-compose_{safe}_{Guid.NewGuid():N}.yml");
+                AddLog($"Compose: found at {remote}");
                 await _ssh.DownloadFileAsync(remote, local, CancellationToken.None);
                 AddLog($"SuccessMsg: docker-compose saved to: {local}", LogLevel.SuccessMsg);
             }
