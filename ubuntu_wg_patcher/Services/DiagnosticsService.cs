@@ -9,9 +9,11 @@ namespace ubuntu_wg_patcher.Services
     public class DiagnosticsService : IDiagnosticsService
     {
         private readonly ISshClientService _ssh;
-        public DiagnosticsService(ISshClientService ssh)
+        private readonly IServerInfoReportService _servrinfo;
+        public DiagnosticsService(ISshClientService ssh, IServerInfoReportService servrinfo)
         {
             _ssh = ssh;
+            _servrinfo = servrinfo;
         }
 
         public async Task<string?> RunServerInfoAsync(SessionParams cfg, IProgress<string> progress, CancellationToken ct)
@@ -144,6 +146,18 @@ namespace ubuntu_wg_patcher.Services
             {
                 Log($"Fatal: Download failed: {ex.Message}");
                 return null;
+            }
+
+            // Append Servrinfo: WireGuard (keys & peers) section at the end of the downloaded report
+            try
+            {
+                var block = await _servrinfo.CollectWireGuardServrinfoAsync(cfg, progress, ct);
+                await File.AppendAllTextAsync(localFile, "\n\n" + block + "\n", ct);
+                Log("SuccessMsg: Servrinfo section appended to report");
+            }
+            catch (Exception ex)
+            {
+                Log($"WARN: failed to append Servrinfo section: {ex.Message}");
             }
 
             Log($"SuccessMsg: ServerInfo report downloaded to: {localFile}");

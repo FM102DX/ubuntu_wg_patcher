@@ -27,7 +27,8 @@ namespace ubuntu_wg_patcher
             InitializeComponent();
             var wgRunner = new WireGuardRunner(_ssh);
             var vlessRunner = new VlessRunner(_ssh);
-            var diagnostics = new DiagnosticsService(_ssh);
+            var servrinfo = new ServerInfoReportService(_ssh);
+            var diagnostics = new DiagnosticsService(_ssh, servrinfo);
             _vm = new MainViewModel(_storage, _ssh, wgRunner, vlessRunner, diagnostics);
             DataContext = _vm;
 
