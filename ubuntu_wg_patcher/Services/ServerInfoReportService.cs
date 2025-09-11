@@ -21,6 +21,7 @@ namespace ubuntu_wg_patcher.Services
             void Log(string m) => progress.Report(m);
             var sb = new StringBuilder();
             sb.AppendLine("=== Servrinfo: WireGuard (keys & peers) ===");
+            sb.AppendLine("Policy: PSK = off");
 
             try
             {
@@ -132,6 +133,7 @@ namespace ubuntu_wg_patcher.Services
                 sb.AppendLine();
 
                 sb.AppendLine($"[Peers] (N={peers.Count})");
+                bool anyPsk = false;
                 foreach (var p in peers)
                 {
                     sb.AppendLine($"  - PeerPublicKey: {p.Pub}");
@@ -141,12 +143,18 @@ namespace ubuntu_wg_patcher.Services
                     sb.AppendLine($"    Transfer: rx={p.Rx} tx={p.Tx}");
                     sb.AppendLine($"    PersistentKeepalive: {(string.IsNullOrWhiteSpace(p.Keepalive) ? "off" : p.Keepalive)}");
                     sb.AppendLine($"    PresharedKeyPresent: {(p.Psk ? "true" : "false")}");
+                    if (p.Psk) anyPsk = true;
                 }
 
                 var allKeys = string.Join(", ", peers.Select(x => x.Pub));
                 sb.AppendLine();
                 sb.AppendLine("PeerPublicKeys (comma-separated):");
                 sb.AppendLine(allKeys);
+
+                if (anyPsk)
+                {
+                    Log("WARN: PSK policy violation detected in Servrinfo (expected PSK=off)");
+                }
             }
             catch (Exception ex)
             {

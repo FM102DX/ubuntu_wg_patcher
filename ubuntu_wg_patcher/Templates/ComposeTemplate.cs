@@ -23,7 +23,8 @@ namespace ubuntu_wg_patcher.Templates
             sb.AppendLine("      - TZ=Europe/London");
             sb.AppendLine("      - SERVERURL=auto");
             sb.AppendLine($"      - SERVERPORT={wgPort}");
-            sb.AppendLine($"      - PEERS={peers}");
+            // Deterministic behavior: peers will be provisioned by our code, not by the container
+            sb.AppendLine("      - PEERS=0");
             sb.AppendLine("      - PEERDNS=auto");
             sb.AppendLine("      - INTERNAL_SUBNET=10.13.13.0");
             sb.AppendLine("      - ALLOWEDIPS=0.0.0.0/0");
