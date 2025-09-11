@@ -24,4 +24,10 @@
     </Content>
   </ItemGroup>
 
+  <!-- Exclude legacy Runner.cs from compilation -->
+  <ItemGroup>
+    <Compile Remove="Services\Runner.cs" />
+    <None Include="Services\Runner.cs" />
+  </ItemGroup>
+
 </Project>
