@@ -204,6 +204,77 @@ namespace ubuntu_wg_patcher.ViewModels
         }
 
         [RelayCommand]
+        private async Task GetWgFolderAsync()
+        {
+            var cfg = SelectedConfig;
+            if (cfg == null) return;
+            if (string.IsNullOrWhiteSpace(cfg.Host) || string.IsNullOrWhiteSpace(cfg.Login))
+            {
+                AddLog("Error: Host or Login is empty", LogLevel.Error);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(cfg.ExportPath))
+            {
+                AddLog("Error: Export folder is empty", LogLevel.Error);
+                return;
+            }
+
+            var warn = $"ВНИМАНИЕ! все содержимое папки {cfg.ExportPath} будет стерто. Продолжить?";
+            var confirm = MessageBox.Show(warn, "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Stop, MessageBoxDefaultButton.Button2);
+            if (confirm != DialogResult.Yes)
+            {
+                AddLog("Cancelled: user aborted GetWgFolder.");
+                return;
+            }
+
+            try
+            {
+                AddLog($"GetWgFolder: connecting to {cfg.Host}:{cfg.Port} as {cfg.Login}...");
+                await _ssh.ConnectAsync(cfg.Host, cfg.Port, cfg.Login, cfg.Password, CancellationToken.None);
+
+                // Prefer /root/wireguard; fallback to /opt/wireguard and $HOME/wireguard
+                var detect = string.Join(" ", new[]
+                {
+                    "bash -lc 'for p in /root/wireguard /opt/wireguard \"$HOME\"/wireguard; do",
+                    "if [ -d \"$p\" ]; then echo \"$p\"; exit 0; fi; done; echo NOT_FOUND'"
+                });
+                var (exit, stdout, stderr) = await _ssh.RunCommandAsync(detect, TimeSpan.FromSeconds(30), CancellationToken.None);
+                var remote = (stdout ?? string.Empty).Trim();
+                if (exit != 0 || string.IsNullOrWhiteSpace(remote) || remote.Equals("NOT_FOUND", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddLog($"Error: remote wireguard folder not found (tried /root/wireguard, /opt/wireguard, $HOME/wireguard). Stderr: {stderr}", LogLevel.Error);
+                    return;
+                }
+
+                // Purge local target folder
+                try
+                {
+                    if (Directory.Exists(cfg.ExportPath))
+                    {
+                        AddLog($"Purging local folder: {cfg.ExportPath} ...");
+                        Directory.Delete(cfg.ExportPath, recursive: true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"WARN: failed to fully delete export folder: {ex.Message}");
+                }
+                try { Directory.CreateDirectory(cfg.ExportPath); } catch { }
+
+                var localWireguardRoot = Path.Combine(cfg.ExportPath, "wireguard");
+                try { Directory.CreateDirectory(localWireguardRoot); } catch { }
+
+                AddLog($"Downloading {remote} to {localWireguardRoot} ...");
+                await _ssh.DownloadDirectoryAsync(remote, localWireguardRoot, CancellationToken.None);
+                AddLog($"SuccessMsg: WireGuard folder copied to: {localWireguardRoot}", LogLevel.SuccessMsg);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Fatal: GetWgFolder failed: {ex.Message}", LogLevel.Fatal);
+            }
+        }
+
+        [RelayCommand]
         private async Task SmokeAsync()
         {
             var cfg = SelectedConfig;

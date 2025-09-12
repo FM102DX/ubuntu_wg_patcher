@@ -118,6 +118,10 @@
                         <Button Width="34" Height="28" Margin="8,0,0,0" Command="{Binding BrowseExportPathCommand}" ToolTip="Select export folder">
                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" FontSize="16" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                         </Button>
+                        <!-- Open export folder (moved here as requested) -->
+                        <Button Width="34" Height="28" Margin="8,0,0,0" Command="{Binding OpenExportFolderCommand}" ToolTip="Open export folder">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8A7;" FontSize="16" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Button>
                     </StackPanel>
 
                     <!-- Spacer row pushes buttons to bottom -->
@@ -127,9 +131,8 @@
                     <StackPanel Grid.Row="12" Grid.ColumnSpan="2" Orientation="Vertical" HorizontalAlignment="Left">
                         <Button Content="Smoke" Width="140" Height="30" Command="{Binding SmokeCommand}"/>
                         <Button Content="Take d.compose" Width="140" Height="30" Margin="0,8,0,0" Command="{Binding TakeComposeCommand}"/>
-                        <Button Content="ServerInfo" Width="140" Height="30" Margin="0,8,0,0" Command="{Binding ServerInfoCommand}"/>
+                        <Button Content="GetWgFolder" Width="140" Height="30" Margin="0,8,0,0" Command="{Binding GetWgFolderCommand}"/>
                         <Button Content="Save" Width="140" Height="32" Margin="0,16,0,0" Command="{Binding SaveAllCommand}"/>
-                        <Button Content="Open folder" Width="140" Height="32" Margin="0,8,0,0" Command="{Binding OpenExportFolderCommand}"/>
                         <Button Content="START" Width="140" Height="36" Margin="0,8,0,0" Command="{Binding StartCommand}"/>
                     </StackPanel>
                 </Grid>

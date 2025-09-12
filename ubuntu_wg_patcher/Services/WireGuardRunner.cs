@@ -22,96 +22,6 @@ namespace ubuntu_wg_patcher.Services
             _ssh = ssh;
         }
 
-        private async Task ProvisionPeersWithoutPskAsync(SessionParams session, Action<string> log, Action<string> success, CancellationToken ct)
-        {
-            // Что делает: детерминированно провиженит N пиров без PSK внутри контейнера, делает сохранение конфигурации и клиентские peer{i}.conf.
-            // Зачем: устранить зависимость от автогенерации пиров образа; всегда Policy: PSK=off.
-            var n = Math.Max(0, session.Peers);
-            if (n == 0)
-            {
-                log("Provision: peers count is 0 — skipping peer provisioning.");
-                return;
-            }
-
-            log($"Provision: generating {n} peers (PSK=off)...");
-
-            // Получим публичный IP ещё раз (для Endpoint). На случай NAT подмены он совпадает с ранее использованным.
-            var publicIp = await _ssh.GetPublicIpAsync(ct);
-
-            // Склепаем скрипт, который внутри контейнера:
-            //  - очищает любые существующие peers (wg set wg0 peer ... remove) и peer*/
-            //  - извлекает server public key и listening port из wg show
-            //  - генерирует peer{i} ключи/папки, добавляет peer в wg0 (AllowedIPs=10.13.13.{i+1}/32)
-            //  - апдейтит /config/wg0.conf (только [Peer] секции) без PresharedKey
-            //  - пишет /config/peer{i}/peer{i}.conf для клиента (без PSK), Endpoint=<publicIp>:<WgPort>
-            //  - чистит любые PresharedKey из конфигов (на всякий случай)
-            var script = $$"""
-set -e
-srv_pub="$(wg show | awk -F': ' "/^public key:/{print $2; exit}")" || true
-listen_port="$(wg show | awk -F': ' "/^listening port:/{print $2; exit}")" || true
-mkdir -p /config
-# remove existing peer dirs and peers from runtime
-find /config -maxdepth 1 -type d -name "peer*" -exec rm -rf {} + 2>/dev/null || true
-for k in $(wg show wg0 peers 2>/dev/null); do wg set wg0 peer "$k" remove || true; done
-# strip all [Peer] sections from wg0.conf, keep only [Interface]
-if [ -f /config/wg0.conf ]; then
-  awk "BEGIN{s=1} /^\\[Peer\\]$/{s=0} s==1 {print}" /config/wg0.conf > /tmp/wg0_iface.conf || true
-  if [ -s /tmp/wg0_iface.conf ]; then cp /tmp/wg0_iface.conf /config/wg0.conf; fi
-fi
-
-PEERS={{n}}
-for i in $(seq 1 $PEERS); do
-  dir="/config/peer${i}"; mkdir -p "$dir"
-  priv="$(wg genkey)"; pub="$(printf "%s" "$priv" | wg pubkey)"
-  echo "$priv" > "$dir/peer${i}.key"; chmod 600 "$dir/peer${i}.key"
-  echo "$pub" > "$dir/peer${i}.pub"
-  addr=$((i+1))
-  # runtime add on server
-  wg set wg0 peer "$pub" allowed-ips 10.13.13.${addr}/32
-  # persist on server
-  printf "\n[Peer]\nPublicKey=%s\nAllowedIPs=10.13.13.%s/32\n" "$pub" "$addr" >> /config/wg0.conf
-  # client config (no PSK)
-  cat > "$dir/peer${i}.conf" <<EOF
-[Interface]
-PrivateKey=$priv
-Address=10.13.13.${addr}/32
-DNS=1.1.1.1
-
-[Peer]
-PublicKey=${srv_pub}
-AllowedIPs=0.0.0.0/0
-Endpoint={{publicIp}}:{{session.WgPort}}
-PersistentKeepalive=25
-EOF
-done
-
-# ensure no PSK lines anywhere
-sed -i "/^PresharedKey/d" /config/wg0.conf 2>/dev/null || true
-find /config -type f -name "*.conf" -exec sed -i "/^PresharedKey/d" {} + 2>/dev/null || true
-""";
-
-            // Передадим скрипт в контейнер через base64, затем выполним
-            // ВАЖНО: нормализуем переводы строк к LF, иначе busybox sh может ругаться (set: illegal option -) на CRLF
-            var scriptLf = script.Replace("\r\n", "\n").Replace("\r", "\n");
-            var scriptB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptLf));
-            var cmd = $"docker exec wireguard sh -lc 'echo {scriptB64} | base64 -d > /tmp/prov_no_psk.sh && chmod +x /tmp/prov_no_psk.sh && sh /tmp/prov_no_psk.sh'";
-            var (exit, stdout, stderr) = await _ssh.RunCommandAsync(cmd, TimeSpan.FromMinutes(4), ct);
-            if (exit != 0)
-                throw new Exception($"Provision failed: {stderr}\n{stdout}");
-
-            // Guard: убедимся, что PSK нигде не остался (wg showconf + grep файлов)
-            var (_, g1, _) = await _ssh.RunCommandAsync("docker exec wireguard sh -lc 'wg showconf wg0 | grep -n ^PresharedKey || true'", TimeSpan.FromSeconds(15), ct);
-            var (_, g2, _) = await _ssh.RunCommandAsync("docker exec wireguard sh -lc 'grep -n ^PresharedKey /config/peer*/peer*.conf 2>/dev/null || true'", TimeSpan.FromSeconds(15), ct);
-            if (!string.IsNullOrWhiteSpace((g1 ?? string.Empty).Trim()) || !string.IsNullOrWhiteSpace((g2 ?? string.Empty).Trim()))
-            {
-                log("ERROR: PSK policy violated; cleaning any PresharedKey lines...");
-                await _ssh.RunCommandAsync("docker exec wireguard sh -lc \"sed -i '/^PresharedKey/d' /config/wg0.conf 2>/dev/null; find /config -type f -name '*.conf' -exec sed -i '/^PresharedKey/d' {} + 2>/dev/null\"", TimeSpan.FromSeconds(20), ct);
-                log("Fixed: removed PresharedKey lines from configs");
-            }
-
-            success($"Peers provisioned (N={n}), PSK=off");
-        }
-
         public async Task<RunnerResult> RunAsync(SessionParams session, IProgress<string> progress, CancellationToken ct)
         {
             void LogLine(string line) => progress.Report(line);
@@ -142,9 +52,6 @@ find /config -type f -name "*.conf" -exec sed -i "/^PresharedKey/d" {} + 2>/dev/
 
                 // Start & Verify: запуск контейнера и верификация, что реально работает (кратко)
                 await StartContainerAndVerifyAsync(session, LogLine, SuccessMsg, ct);
-
-                // New stage: deterministic peer provisioning without PSK
-                await ProvisionPeersWithoutPskAsync(session, LogLine, SuccessMsg, ct);
 
                 // Export: выгружаем артефакты и .conf на локальную машину (кратко)
                 await ExportArtifactsAsync(session, LogLine, SuccessMsg, ct);

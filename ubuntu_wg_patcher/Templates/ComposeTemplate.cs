@@ -24,12 +24,12 @@ namespace ubuntu_wg_patcher.Templates
             sb.AppendLine("      - SERVERURL=auto");
             sb.AppendLine($"      - SERVERPORT={wgPort}");
             // Deterministic behavior: peers will be provisioned by our code, not by the container
-            sb.AppendLine("      - PEERS=0");
+            sb.AppendLine($"      - PEERS={peers}");
             sb.AppendLine("      - PEERDNS=auto");
             sb.AppendLine("      - INTERNAL_SUBNET=10.13.13.0");
             sb.AppendLine("      - ALLOWEDIPS=0.0.0.0/0");
             sb.AppendLine("    volumes:");
-            sb.AppendLine("      - ~/wireguard/config:/config");
+            sb.AppendLine("      - /root/wireguard/config:/config");
             sb.AppendLine("      - /lib/modules:/lib/modules");
             sb.AppendLine("    ports:");
             sb.AppendLine($"      - {wgPort}:{wgPort}/udp");
